@@ -1,0 +1,4 @@
+Directory: include/Algorithms/
+Header declarations for graph routing algorithms and preprocessing techniques:
+- Queries/: Live search engines (Dijkstra, Bidirectional Dijkstra, A*, Bidirectional A*, ALT, Contraction Hierarchies query).
+- Preprocessing/: Preprocessing pipelines (Landmark selection strategies, CH node contraction, shortcut generation).

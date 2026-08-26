@@ -1,0 +1,3 @@
+Directory: paper/figures/
+Contains auto-generated benchmark plots and visualization artifacts (PDF / PNG) to include in paper/main.tex.
+Generated via scripts/plot_benchmarks.py.

@@ -1,0 +1,5 @@
+Directory: include/Algorithms/Preprocessing/
+Header files for preprocessing stages:
+- Landmark Selection (Random, Farthest, Avoid heuristic methods)
+- Landmark Distance Precomputation (All-to-Landmarks / Landmarks-to-All tables)
+- Contraction Hierarchies Preprocessing (Node ordering heuristics, node contraction, witness search, and shortcut graph construction)

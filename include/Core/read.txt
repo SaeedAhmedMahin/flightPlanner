@@ -1,0 +1,6 @@
+Directory: include/Core/
+C++ header files for core domain models:
+- Graph representations (Adjacency list / CSR graph)
+- Airport, Route, and Flight data structures
+- Geographic distance utilities (Haversine, Great-Circle)
+- Date and Time parsing and schedule handling

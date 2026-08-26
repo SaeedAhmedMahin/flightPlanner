@@ -1,0 +1,2 @@
+Directory: src/
+C++ implementation source files corresponding to headers in include/ (Core, Algorithms, TUI) and main entrypoint application.

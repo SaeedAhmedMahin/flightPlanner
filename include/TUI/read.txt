@@ -1,0 +1,5 @@
+Directory: include/TUI/
+Header files for the Terminal User Interface:
+- Terminal rendering components and layout
+- Airport / route search input and constraint filtering UI
+- ASCII / Braille terminal world map rendering and route path visualization

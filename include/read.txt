@@ -1,0 +1,5 @@
+Directory: include/
+C++ header files for FlightRouter-Research:
+- Core/: Graph representations, Date/Time, Flight, Route, and geographic models.
+- Algorithms/: Search queries (Dijkstra, A*, Bi-A*, ALT, CH) and preprocessing modules.
+- TUI/: Terminal User Interface modules, world map rendering, and visualization.

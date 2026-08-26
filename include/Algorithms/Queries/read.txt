@@ -1,0 +1,8 @@
+Directory: include/Algorithms/Queries/
+Header files for live path search queries:
+- Dijkstra's Algorithm
+- Bidirectional Dijkstra
+- A* Search (Haversine distance heuristic)
+- Bidirectional A*
+- ALT Query Engine (A*, Landmarks, Triangle Inequality)
+- Contraction Hierarchies (CH) Query Engine (Bidirectional upward search)

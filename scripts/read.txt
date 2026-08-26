@@ -1,0 +1,4 @@
+Directory: scripts/
+Contains helper scripts for data retrieval, preprocessing, and statistical analysis / benchmarking visualization.
+- fetch_openflights.py: Script to download and clean OpenFlights data into data/raw/.
+- plot_benchmarks.py: Python/Seaborn scripts for ANOVA, t-tests, and plotting benchmarks to paper/figures/.

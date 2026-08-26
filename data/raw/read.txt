@@ -1,0 +1,3 @@
+Directory: data/raw/
+Stores raw OpenFlights CSV datasets such as airports.dat, routes.dat, and airlines.dat.
+Use scripts/fetch_openflights.py to download and populate this directory.

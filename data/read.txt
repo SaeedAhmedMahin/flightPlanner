@@ -1,0 +1,4 @@
+Directory: data/
+Contains raw datasets and processed graph structures for FlightRouter-Research.
+- raw/: Raw OpenFlights data files (airports.dat, routes.dat).
+- processed/: Serialized graph data, CH shortcut graphs, ALT landmarks.

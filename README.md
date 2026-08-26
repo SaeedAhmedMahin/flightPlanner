@@ -4,7 +4,7 @@ A high-performance C++ research project designed to benchmark, analyze, and visu
 
 ---
 
-## 🎯 Research Objectives & Questions
+##  Research Objectives & Questions
 
 The primary objective of this project is to evaluate the performance of hierarchical, goal-directed, and bidirectional graph traversal techniques under different constraints (time, cost, layovers). 
 
@@ -16,7 +16,7 @@ The primary objective of this project is to evaluate the performance of hierarch
 
 ---
 
-## 🧭 Algorithms to Implement & Compare
+##  Algorithms to Implement & Compare
 
 We implement and benchmark several routing algorithms:
 
@@ -29,7 +29,7 @@ We implement and benchmark several routing algorithms:
 
 ---
 
-## 🏗️ Directory Structure
+##  Directory Structure
 
 The project follows a modular C++ structure designed to separate core routing logic, algorithms, preprocessing steps, tests, benchmarking scripts, and the TUI:
 
@@ -59,7 +59,7 @@ FlightRouter-Research/
 
 ---
 
-## 📊 Benchmarking & Analysis
+##  Benchmarking & Analysis
 
 To support a rigorous academic-style mini-paper (8–12 pages), the project features automated benchmarking scripts to capture and analyze:
 - **Query Runtime:** Wall-clock query execution times (microseconds).
@@ -69,7 +69,7 @@ To support a rigorous academic-style mini-paper (8–12 pages), the project feat
 
 ---
 
-## 🖥️ Terminal User Interface (TUI)
+##  Terminal User Interface (TUI)
 
 The frontend operates completely within the terminal, featuring:
 - **Interactive Queries:** Choose origin, destination, date, flight type (one-way vs. multi-flight roundtrip), and optimization metrics (cheapest, fastest, best).

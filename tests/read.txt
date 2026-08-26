@@ -1,0 +1,5 @@
+Directory: tests/
+Unit and integration test suites (using Catch2 or GoogleTest) validating:
+- Core data structures (Graph representation, Route calculations)
+- Algorithm correctness against reference Dijkstra implementations
+- Landmark preprocessing and CH contraction integrity

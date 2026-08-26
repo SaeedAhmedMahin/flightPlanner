@@ -1,0 +1,2 @@
+Directory: data/processed/
+Stores serialized graph structures, preprocessed Contraction Hierarchies (CH) shortcut graphs, and ALT landmark distance tables.

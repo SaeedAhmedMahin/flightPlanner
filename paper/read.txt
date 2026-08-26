@@ -1,0 +1,4 @@
+Directory: paper/
+Contains LaTeX research mini-paper source files, bibliography, and generated benchmark figures.
+- main.tex: Main LaTeX document.
+- figures/: Auto-generated benchmark plots (PDF/PNG).
