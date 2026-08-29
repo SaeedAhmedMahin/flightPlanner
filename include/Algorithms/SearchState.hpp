@@ -1,9 +1,11 @@
 #pragma once
 #include <cstdint>
 
+// 8 bytes
 struct SearchState {
-  uint32_t node_id;
-  uint16_t total_cost;   // The feature we are minimizing (Price or Duration)
+  uint32_t total_cost; // The feature we are minimizing (Price or Duration)
+
+  uint16_t node_id;
   uint16_t current_time; // Absolute time elapsed + initial departure (for
                          // layover logic)
 

@@ -21,6 +21,7 @@ public:
   // Core Algorithmic Graph
   std::vector<airport> nodes;
   std::vector<std::vector<flight>> adjacency_list;
+  std::unordered_map<std::string, uint32_t> iata_to_id;
 
   // UI Metadata
   std::vector<airportDetails> ui_nodes;
@@ -43,7 +44,6 @@ public:
 private:
   std::unordered_map<std::string, uint16_t> country_map;
   std::unordered_map<std::string, uint8_t> airline_map;
-  std::unordered_map<std::string, uint32_t> iata_to_id;
 
   // A robust CSV splitter that ignores commas inside "quotes"
   std::vector<std::string> parse_csv_line(const std::string &line) {

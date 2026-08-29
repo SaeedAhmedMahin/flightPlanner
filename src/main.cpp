@@ -1,69 +1,79 @@
+#include "Algorithms/Dijkstra.hpp"
 #include "DataLoader.hpp"
+#include <chrono>
 #include <exception>
+#include <iomanip>
 #include <iostream>
+
+void print_result(const RoutingResult &res, const DataLoader &loader,
+                  const std::string &label, long compute_time_us) {
+  std::cout << "\n=== " << label << " ROUTE ===\n";
+  std::cout << "Compute Time:   " << compute_time_us << " microseconds\n";
+  std::cout << "Nodes Explored: " << res.metrics.nodes_explored << "\n";
+  std::cout << "Edges Relaxed:  " << res.metrics.edges_relaxed << "\n";
+
+  if (!res.success) {
+    std::cout << "Status: No valid route found.\n";
+    return;
+  }
+
+  std::cout << "\nTotal Price: $" << res.total_price
+            << "  |  Total Time: " << res.total_time_mins / 60 << "h "
+            << res.total_time_mins % 60 << "m\n";
+  std::cout << "------------------------------------------------------\n";
+
+  for (const flight &f : res.path) {
+    const flightDetails &f_ui = loader.ui_flights[f.flight_details_id];
+    const airportDetails &dest_apt = loader.ui_nodes[f.destination_id];
+
+    std::string dep_time = std::to_string(f.departure_time / 60) + ":" +
+                           (f.departure_time % 60 < 10 ? "0" : "") +
+                           std::to_string(f.departure_time % 60);
+    std::string arr_time = std::to_string(f.arrival_time / 60) + ":" +
+                           (f.arrival_time % 60 < 10 ? "0" : "") +
+                           std::to_string(f.arrival_time % 60);
+    std::string day_shift =
+        f.day_change > 0 ? " (+" + std::to_string(f.day_change) + ")" : "";
+
+    std::cout << "Flight " << f_ui.airline_code << " " << f_ui.flight_number
+              << " -> " << dest_apt.iata_code << "  |  Dep: " << std::setw(5)
+              << dep_time << "  |  Arr: " << std::setw(5) << arr_time
+              << day_shift << "  |  $" << f.price << "\n";
+  }
+}
 
 int main() {
   DataLoader loader;
+  std::cout << "Loading AeroGraph Data...\n";
+  loader.load_data("data/processed/airports_clean.csv",
+                   "data/processed/routes_clean.csv");
 
-  std::cout << "Initializing AeroGraph Engine...\n";
-  std::cout << "Reading synthetic flight data...\n";
+  std::string source_iata = "DAC"; // Dhaka
+  std::string dest_iata = "JFK";   // New York
 
-  try {
-    // Adjust the paths if your compiled executable runs from a different
-    // working directory
-    loader.load_data("../data/processed/airports_clean.csv",
-                     "../data/processed/routes_clean.csv");
-  } catch (const std::exception &e) {
-    std::cerr << "Fatal Data Error: " << e.what() << "\n";
-    return 1;
-  }
+  uint32_t source_id = loader.iata_to_id[source_iata];
+  uint32_t dest_id = loader.iata_to_id[dest_iata];
 
-  std::cout << "\n--- Data Structure Verification ---\n";
+  std::cout << "\nRouting: " << source_iata << " -> " << dest_iata << "\n";
+  Dijkstra router;
 
-  // Inspect the first airport in the dataset (Dense ID 0)
-  if (!loader.nodes.empty()) {
-    const airport &test_node = loader.nodes[0];
-    const airportDetails &test_ui = loader.ui_nodes[0];
+  // --- 1. CHEAPEST ROUTE ---
+  auto start = std::chrono::high_resolution_clock::now();
+  RoutingResult cheapest = router.run(source_id, dest_id, loader.adjacency_list,
+                                      loader.nodes, OptimizeFor::PRICE);
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::high_resolution_clock::now() - start);
 
-    std::cout << "Airport Node 0:\n";
-    std::cout << "  Name:     " << test_ui.name << " (" << test_ui.iata_code
-              << ")\n";
-    std::cout << "  Location: " << test_ui.city << ", "
-              << loader.country_pool[test_ui.country_id] << "\n";
-    std::cout << "  Coords:   " << test_node.latitude << ", "
-              << test_node.longitude << "\n";
-    std::cout << "  UTC Base: " << (int)test_node.utc_offset_15m * 0.25
-              << " hours\n";
-    std::cout << "  Outbound: " << loader.adjacency_list[0].size()
-              << " flights\n\n";
+  print_result(cheapest, loader, "CHEAPEST", duration.count());
 
-    // Inspect the first outbound flight from this airport
-    if (!loader.adjacency_list[0].empty()) {
-      const flight &test_flight = loader.adjacency_list[0][0];
-      const flightDetails &flight_ui =
-          loader.ui_flights[test_flight.flight_details_id];
+  // --- 2. FASTEST ROUTE ---
+  start = std::chrono::high_resolution_clock::now();
+  RoutingResult fastest = router.run(source_id, dest_id, loader.adjacency_list,
+                                     loader.nodes, OptimizeFor::TIME);
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::high_resolution_clock::now() - start);
 
-      std::cout << "First Outbound Flight from Node 0:\n";
-      std::cout << "  Carrier:  " << flight_ui.airline_code << " "
-                << flight_ui.flight_number << " (" << flight_ui.plane_model
-                << ")\n";
-      std::cout << "  Dest ID:  " << test_flight.destination_id << "\n";
-      std::cout << "  Price:    $" << test_flight.price << "\n";
-      std::cout << "  Departs:  " << test_flight.departure_time / 60 << ":"
-                << (test_flight.departure_time % 60 == 0
-                        ? "00"
-                        : std::to_string(test_flight.departure_time % 60))
-                << " Local\n";
-      std::cout << "  Arrives:  " << test_flight.arrival_time / 60 << ":"
-                << (test_flight.arrival_time % 60 == 0
-                        ? "00"
-                        : std::to_string(test_flight.arrival_time % 60))
-                << " Local\n";
-      std::cout << "  Day Shift:" << (int)test_flight.day_change << "\n";
-    }
-  }
-
-  std::cout << "\nGraph built successfully. Ready for routing algorithms.\n";
+  print_result(fastest, loader, "FASTEST", duration.count());
 
   return 0;
 }
