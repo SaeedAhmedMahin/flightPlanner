@@ -13,8 +13,9 @@
 - [ ] Graph Builder (Construct the contiguous Adjacency List)
 
 ## 3. Algorithms & Routing
-- [ ] Multi-criteria edge weighting (Scalarization: cost vs. time vs. layovers)
-- [ ] Dijkstra's Algorithm (Baseline control group)
+- [x] Multi-criteria edge weighting (Scalarization: cost vs. time vs. layovers)
+- [x] Dijkstra's Algorithm (Baseline control group)
+- [ ] Yen's Algorithm
 - [ ] A* Search (Haversine heuristic)
 - [ ] Bi-directional Dijkstra / A*
 - [ ] Contraction Hierarchies (Offline node contraction)
