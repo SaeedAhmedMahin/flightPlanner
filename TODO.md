@@ -8,7 +8,7 @@
 ## 2. Data Handling
 - [x] Python Data Fetcher & Cleaner (`fetch_openflights.py`)
 - [x] Synthetic multi-variable weights (Cost, Duration, Time Zones)
-- [ ] C++ CSV Parser (Read `airports_clean.csv` & `routes_clean.csv`)
+- [x] C++ CSV Parser (Read `airports_clean.csv` & `routes_clean.csv`)
 - [ ] Metadata Registry (Hash maps for IATA -> ID, String pooling)
 - [ ] Graph Builder (Construct the contiguous Adjacency List)
 

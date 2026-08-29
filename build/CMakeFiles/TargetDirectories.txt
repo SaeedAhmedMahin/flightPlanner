@@ -1,0 +1,3 @@
+/Users/saeedahmedmahin/code/flightPlanner/build/CMakeFiles/flight_router.dir
+/Users/saeedahmedmahin/code/flightPlanner/build/CMakeFiles/edit_cache.dir
+/Users/saeedahmedmahin/code/flightPlanner/build/CMakeFiles/rebuild_cache.dir

@@ -1,3 +1,4 @@
+#pragma once
 #include <cstdint>
 #include <string>
 /*
@@ -9,7 +10,7 @@ struct airportDetails {
   uint32_t id; // airport id connecting it to the airport node
   std::string name;
   std::string city;
-  uint16_t country; // country name so we have an array ["Bangladesh", "USA",
-                    // "UK", "China" ...]
+  uint16_t country_id; // country name so we have an array ["Bangladesh", "USA",
+                       // "UK", "China" ...]
   std::string iata_code; // 3 letter code for the airport like "DAC", "JFK" ...
 };

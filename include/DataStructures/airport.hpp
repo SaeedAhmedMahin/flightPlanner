@@ -1,3 +1,4 @@
+#pragma once
 #include <cstdint>
 
 // Total 16 bytes
