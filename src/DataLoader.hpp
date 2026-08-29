@@ -43,6 +43,7 @@ public:
 private:
   std::unordered_map<std::string, uint16_t> country_map;
   std::unordered_map<std::string, uint8_t> airline_map;
+  std::unordered_map<std::string, uint32_t> iata_to_id;
 
   // A robust CSV splitter that ignores commas inside "quotes"
   std::vector<std::string> parse_csv_line(const std::string &line) {
@@ -136,6 +137,7 @@ private:
 
       nodes.push_back(apt);
       ui_nodes.push_back(ui_apt);
+      iata_to_id[cols[4]] = id;
     }
     std::cout << "Loaded " << nodes.size() << " airports.\n";
   }

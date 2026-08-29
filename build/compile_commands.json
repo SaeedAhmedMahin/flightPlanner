@@ -1,0 +1,8 @@
+[
+{
+  "directory": "/Users/saeedahmedmahin/code/flightPlanner/build",
+  "command": "/usr/bin/c++  -I/Users/saeedahmedmahin/code/flightPlanner/include -std=gnu++20 -arch arm64 -o CMakeFiles/flight_router.dir/src/main.cpp.o -c /Users/saeedahmedmahin/code/flightPlanner/src/main.cpp",
+  "file": "/Users/saeedahmedmahin/code/flightPlanner/src/main.cpp",
+  "output": "CMakeFiles/flight_router.dir/src/main.cpp.o"
+}
+]
