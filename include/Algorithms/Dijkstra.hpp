@@ -37,9 +37,7 @@ public:
     std::vector<uint32_t> parent_node(num_nodes, INF);
     std::vector<flight> edge_to(num_nodes);
 
-    std::priority_queue<SearchState, std::vector<SearchState>,
-                        std::greater<SearchState>>
-        pq;
+    std::priority_queue<SearchState, std::vector<SearchState>, CompareCost> pq;
 
     min_cost[source_id] = 0;
     pq.push({0, static_cast<uint16_t>(source_id), start_time});

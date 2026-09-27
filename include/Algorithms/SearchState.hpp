@@ -3,16 +3,15 @@
 
 // 8 bytes
 struct SearchState {
-  uint32_t total_cost; // The feature we are minimizing (Price or Duration)
-
+  uint32_t total_cost;
   uint16_t node_id;
-  uint16_t current_time; // Absolute time elapsed + initial departure (for
-                         // layover logic)
+  uint16_t current_time;
+  // No operator overloading inside the struct at all
+};
 
-  // C++ std::priority_queue is a Max-Heap by default.
-  // Overloading '>' flips it into a Min-Heap so the lowest total_cost pops
-  // first.
-  bool operator>(const SearchState &other) const {
-    return total_cost > other.total_cost;
+// Custom Comparator (Functor)
+struct CompareCost {
+  bool operator()(const SearchState &a, const SearchState &b) const {
+    return a.total_cost > b.total_cost; // > creates a Min-Heap
   }
 };

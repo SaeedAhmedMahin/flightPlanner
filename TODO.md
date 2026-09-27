@@ -18,6 +18,12 @@
 - [ ] Yen's Algorithm
 - [ ] A* Search (Haversine heuristic)
 - [ ] Bi-directional Dijkstra / A*
+- [ ] Label-Correcting Algorithm (SPPRC Bellman-Ford variant)
+- [ ] The Pulse Algorithm (DFS with bounding and rollback)
+- [ ] Resource-Constrained A* (RC-A* with heuristic look-ahead)
+- [ ] Lagrangian Relaxation (Dynamic penalty multipliers)
+- [ ] Column Generation (Master/subproblem fleet optimization)
+- [ ] Metaheuristics (Genetic Algorithms / Ant Colony Optimization)
 - [ ] Contraction Hierarchies (Offline node contraction)
 - [ ] Contraction Hierarchies (Live query)
 - [ ] ALT Preprocessing (Landmark selection & triangle inequality)
