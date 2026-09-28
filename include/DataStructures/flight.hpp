@@ -9,7 +9,7 @@ struct flight {
   uint16_t price;
   uint16_t departure_time; // Mins from midnight local time (0 - 1439)
   uint16_t arrival_time;   // Mins from midnight local time (0 - 1439)
+  uint8_t flight_day;      // Days since 2020-01-01
 
-  int8_t day_change;  // e.g., +1 for overnight flights, 0 for same day
   uint8_t airline_id; // Index for airline penalty heuristics
 };

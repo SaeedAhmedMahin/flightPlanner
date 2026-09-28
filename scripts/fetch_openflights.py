@@ -9,7 +9,6 @@ so we are simulating it for now, using 3 factors:
 
 """
 
-
 import sys
 import os
 import urllib.request
@@ -17,6 +16,7 @@ import pandas as pd
 import numpy as np
 import hashlib
 import random
+import datetime
 
 AIRPORTS_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/airports.dat"
 ROUTES_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/routes.dat"
@@ -95,7 +95,7 @@ def process_data(raw_dir, proc_dir):
     
     df_routes = df_routes.dropna(subset=["source_id", "dest_id", "airline"])
     df_routes["source_id"] = pd.to_numeric(df_routes["source_id"], errors='coerce')
-    df_routes["dest_id"] = pd.to_numeric(df_routes["dest_id"], errors='coerce')
+    df_routes["dest_id"] = pd.to_numeric(df_routes["dest_id"], errors='coerce') #converts data to null if its non numeric
     df_routes = df_routes.dropna(subset=["source_id", "dest_id"])
     
     df_routes = df_routes[df_routes["source_id"].isin(id_map) & df_routes["dest_id"].isin(id_map)]
@@ -108,6 +108,9 @@ def process_data(raw_dir, proc_dir):
     
     # Set seed for reproducible benchmark graphs
     random.seed(42)
+    
+    # Fixed base date for deterministic runs (e.g. 2024-01-01)
+    base_date = datetime.date(2026, 11, 1)
     
     for _, row in df_routes.iterrows():
         src_id = row["dense_source_id"]
@@ -129,7 +132,7 @@ def process_data(raw_dir, proc_dir):
         raw_duration = (dist_km / 800.0) * 60 + 40
         duration_mins = int(round(raw_duration / 5.0) * 5)
         
-        num_flights = random.randint(1, 3)
+        num_flights = random.randint(12, 22)
         
         for _ in range(num_flights):
             # Departure snapped to 5-minute increments
@@ -143,6 +146,12 @@ def process_data(raw_dir, proc_dir):
             
             arrival_time = raw_arrival % 1440
             day_change = raw_arrival // 1440
+            
+            # Generate a random flight date within a 90-day window
+            flight_date_offset = random.randint(0, 89)
+            flight_date = base_date + datetime.timedelta(days=flight_date_offset)
+            # Formatted as YYYY-MM-DD
+            flight_date_str = flight_date.strftime("%Y-%m-%d")
             
             # --- YIELD MANAGEMENT SIMULATOR GOES HERE ---
             rand_event = random.random()
@@ -167,6 +176,7 @@ def process_data(raw_dir, proc_dir):
                 "airline": row["airline"],
                 "equipment": row["equipment"] if pd.notna(row["equipment"]) else "UNK",
                 "price_usd": final_price,
+                "flight_date": flight_date_str,
                 "duration_mins": duration_mins,
                 "departure_time": departure_time,
                 "arrival_time": arrival_time,
