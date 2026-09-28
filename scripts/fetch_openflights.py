@@ -145,7 +145,6 @@ def process_data(raw_dir, proc_dir):
             raw_arrival = arrival_utc_equiv + tz_shift_mins
             
             arrival_time = raw_arrival % 1440
-            day_change = raw_arrival // 1440
             
             # Generate a random flight date within a 90-day window
             flight_date_offset = random.randint(0, 89)
@@ -179,8 +178,7 @@ def process_data(raw_dir, proc_dir):
                 "flight_date": flight_date_str,
                 "duration_mins": duration_mins,
                 "departure_time": departure_time,
-                "arrival_time": arrival_time,
-                "day_change": day_change
+                "arrival_time": arrival_time
             })
             
     df_expanded = pd.DataFrame(expanded_routes)

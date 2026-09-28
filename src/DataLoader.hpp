@@ -18,12 +18,12 @@
 
 class DataLoader {
 public:
-  static uint16_t parse_date_to_days(const std::string& date_str) {
+  static uint8_t parse_date_to_days(const std::string& date_str) {
       int y, m, d;
       if (sscanf(date_str.c_str(), "%d-%d-%d", &y, &m, &d) != 3) return 0;
       static const int days_in_month[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
       int days = 0;
-      for (int year = 2020; year < y; ++year) {
+      for (int year = 2026; year < y; ++year) {
           days += 365 + ((year % 4 == 0) ? 1 : 0);
       }
       for (int month = 1; month < m; ++month) {
@@ -31,7 +31,7 @@ public:
           if (month == 2 && y % 4 == 0) days++;
       }
       days += d - 1;
-      return days;
+      return days > 273 ? static_cast<uint8_t>(days - 273) : 0;
   }
 
   // Core Algorithmic Graph
@@ -175,7 +175,7 @@ private:
       auto cols = parse_csv_line(line);
 
       // Cols: dense_source, dense_dest, airline, equip, price, date, duration, dep,
-      // arr, day_change
+      // arr
       uint32_t src_id = std::stoul(cols[0]);
 
       flight f;
@@ -185,7 +185,6 @@ private:
       f.price = static_cast<uint16_t>(std::stoul(cols[4]));
       f.departure_time = static_cast<uint16_t>(std::stoul(cols[7]));
       f.arrival_time = static_cast<uint16_t>(std::stoul(cols[8]));
-      f.day_change = static_cast<int8_t>(std::stoi(cols[9]));
       f.flight_day = parse_date_to_days(cols[5]);
 
       flightDetails ui_f;

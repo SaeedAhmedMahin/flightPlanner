@@ -82,7 +82,7 @@ public:
         }
 
         uint32_t flight_duration =
-            (edge.arrival_time + (edge.day_change * 1440)) -
+            (edge.arrival_time + (edge.arrival_time < edge.departure_time ? 1440 : 0)) -
             edge.departure_time;
         uint32_t next_time = absolute_flight_departure + flight_duration;
 
@@ -102,8 +102,7 @@ public:
           parent_node[next_node] = current.node_id;
           edge_to[next_node] = edge;
 
-          pq.push({new_cost, static_cast<uint16_t>(next_node),
-                   static_cast<uint16_t>(next_time)});
+          pq.push({new_cost, static_cast<uint16_t>(next_node), next_time});
         }
       }
     }

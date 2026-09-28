@@ -33,7 +33,7 @@ void print_result(const RoutingResult &res, const DataLoader &loader,
                            (f.arrival_time % 60 < 10 ? "0" : "") +
                            std::to_string(f.arrival_time % 60);
     std::string day_shift =
-        f.day_change > 0 ? " (+" + std::to_string(f.day_change) + ")" : "";
+        (f.arrival_time < f.departure_time) ? " (+1)" : "";
 
     std::cout << "Flight " << f_ui.airline_code << " " << f_ui.flight_number
               << " -> " << dest_apt.iata_code << "  |  Dep: " << std::setw(5)
