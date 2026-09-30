@@ -6,3 +6,4 @@ Unit and integration test suites (using Catch2 or GoogleTest) validating:
 
 1.
 -Testing Git for now
+- more testing
