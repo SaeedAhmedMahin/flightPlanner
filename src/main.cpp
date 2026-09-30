@@ -33,7 +33,7 @@ void print_result(const RoutingResult &res, const DataLoader &loader,
                            (f.arrival_time % 60 < 10 ? "0" : "") +
                            std::to_string(f.arrival_time % 60);
     std::string day_shift =
-        f.day_change > 0 ? " (+" + std::to_string(f.day_change) + ")" : "";
+        (f.arrival_time < f.departure_time) ? " (+1)" : "";
 
     std::cout << "Flight " << f_ui.airline_code << " " << f_ui.flight_number
               << " -> " << dest_apt.iata_code << "  |  Dep: " << std::setw(5)
@@ -50,17 +50,29 @@ int main() {
 
   std::string source_iata = "DAC"; // Dhaka
   std::string dest_iata = "JFK";   // New York
+  
+  std::cout << "Enter source airport (IATA): ";
+  std::cin >> source_iata;
+  std::cout << "Enter destination airport (IATA): ";
+  std::cin >> dest_iata;
+  
+  std::string target_date;
+  std::cout << "Enter target date (YYYY-MM-DD): ";
+  std::cin >> target_date;
 
   uint32_t source_id = loader.iata_to_id[source_iata];
   uint32_t dest_id = loader.iata_to_id[dest_iata];
 
-  std::cout << "\nRouting: " << source_iata << " -> " << dest_iata << "\n";
+  std::cout << "\nRouting: " << source_iata << " -> " << dest_iata << " on " << target_date << "\n";
   Dijkstra router;
+  
+  uint32_t start_day = DataLoader::parse_date_to_days(target_date);
+  uint32_t absolute_start_time = start_day * 1440; // 00:00 (Midnight) of target day
 
   // --- 1. CHEAPEST ROUTE ---
   auto start = std::chrono::high_resolution_clock::now();
   RoutingResult cheapest = router.run(source_id, dest_id, loader.adjacency_list,
-                                      loader.nodes, OptimizeFor::PRICE);
+                                      loader.nodes, OptimizeFor::PRICE, absolute_start_time);
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
       std::chrono::high_resolution_clock::now() - start);
 
@@ -69,7 +81,7 @@ int main() {
   // --- 2. FASTEST ROUTE ---
   start = std::chrono::high_resolution_clock::now();
   RoutingResult fastest = router.run(source_id, dest_id, loader.adjacency_list,
-                                     loader.nodes, OptimizeFor::TIME);
+                                     loader.nodes, OptimizeFor::TIME, absolute_start_time);
   duration = std::chrono::duration_cast<std::chrono::microseconds>(
       std::chrono::high_resolution_clock::now() - start);
 

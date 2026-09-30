@@ -29,7 +29,7 @@ public:
   RoutingResult run(uint32_t source_id, uint32_t dest_id,
                     const std::vector<std::vector<flight>> &adjacency_list,
                     const std::vector<airport> &nodes, OptimizeFor mode,
-                    uint16_t start_time = 480) {
+                    uint32_t start_time) {
     uint32_t num_nodes = adjacency_list.size();
     std::vector<uint32_t> min_cost(num_nodes, INF);
 
@@ -62,21 +62,29 @@ public:
         metrics.edges_relaxed++;
         uint32_t next_node = edge.destination_id;
 
-        uint32_t local_arrival_time = current.current_time % 1440;
         uint32_t required_departure =
-            local_arrival_time + nodes[current.node_id].min_transfer;
+            current.current_time + nodes[current.node_id].min_transfer;
+            
+        // The first node has no transfer time required
+        if (current.node_id == source_id) {
+            required_departure = current.current_time;
+        }
 
-        uint32_t wait_time = 0;
-        if (edge.departure_time < required_departure) {
-          wait_time = (1440 - local_arrival_time) + edge.departure_time;
-        } else {
-          wait_time = edge.departure_time - local_arrival_time;
+        uint32_t absolute_flight_departure = edge.flight_day * 1440 + edge.departure_time;
+
+        if (absolute_flight_departure < required_departure) {
+            continue; // Missed the flight (or it departed in the past)
+        }
+        
+        uint32_t wait_time = absolute_flight_departure - current.current_time;
+        if (wait_time > 1440) {
+            continue; // Transit is over 24 hours
         }
 
         uint32_t flight_duration =
-            (edge.arrival_time + (edge.day_change * 1440)) -
+            (edge.arrival_time + (edge.arrival_time < edge.departure_time ? 1440 : 0)) -
             edge.departure_time;
-        uint32_t next_time = current.current_time + wait_time + flight_duration;
+        uint32_t next_time = absolute_flight_departure + flight_duration;
 
         // Determine the optimization metric
         uint32_t new_cost = 0;
@@ -94,8 +102,7 @@ public:
           parent_node[next_node] = current.node_id;
           edge_to[next_node] = edge;
 
-          pq.push({new_cost, static_cast<uint16_t>(next_node),
-                   static_cast<uint16_t>(next_time)});
+          pq.push({new_cost, static_cast<uint16_t>(next_node), next_time});
         }
       }
     }
@@ -108,7 +115,7 @@ private:
                                  SearchState final_state,
                                  const std::vector<uint32_t> &parent_node,
                                  const std::vector<flight> &edge_to,
-                                 uint16_t start_time, RoutingMetrics metrics) {
+                                 uint32_t start_time, RoutingMetrics metrics) {
     RoutingResult result;
     result.success = true;
     result.metrics = metrics;

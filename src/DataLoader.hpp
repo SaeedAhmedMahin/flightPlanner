@@ -18,6 +18,22 @@
 
 class DataLoader {
 public:
+  static uint8_t parse_date_to_days(const std::string& date_str) {
+      int y, m, d;
+      if (sscanf(date_str.c_str(), "%d-%d-%d", &y, &m, &d) != 3) return 0;
+      static const int days_in_month[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+      int days = 0;
+      for (int year = 2026; year < y; ++year) {
+          days += 365 + ((year % 4 == 0) ? 1 : 0);
+      }
+      for (int month = 1; month < m; ++month) {
+          days += days_in_month[month];
+          if (month == 2 && y % 4 == 0) days++;
+      }
+      days += d - 1;
+      return days > 273 ? static_cast<uint8_t>(days - 273) : 0;
+  }
+
   // Core Algorithmic Graph
   std::vector<airport> nodes;
   std::vector<std::vector<flight>> adjacency_list;
@@ -158,8 +174,8 @@ private:
         continue;
       auto cols = parse_csv_line(line);
 
-      // Cols: dense_source, dense_dest, airline, equip, price, duration, dep,
-      // arr, day_change
+      // Cols: dense_source, dense_dest, airline, equip, price, date, duration, dep,
+      // arr
       uint32_t src_id = std::stoul(cols[0]);
 
       flight f;
@@ -167,13 +183,14 @@ private:
       f.flight_details_id = current_flight_id++;
       f.airline_id = get_airline_idx(cols[2]);
       f.price = static_cast<uint16_t>(std::stoul(cols[4]));
-      f.departure_time = static_cast<uint16_t>(std::stoul(cols[6]));
-      f.arrival_time = static_cast<uint16_t>(std::stoul(cols[7]));
-      f.day_change = static_cast<int8_t>(std::stoi(cols[8]));
+      f.departure_time = static_cast<uint16_t>(std::stoul(cols[7]));
+      f.arrival_time = static_cast<uint16_t>(std::stoul(cols[8]));
+      f.flight_day = parse_date_to_days(cols[5]);
 
       flightDetails ui_f;
       ui_f.airline_code = cols[2];
       ui_f.plane_model = cols[3];
+      ui_f.flight_date = cols[5];
       ui_f.flight_number = static_cast<uint16_t>(
           (current_flight_id % 900) +
           100); // Generate a synthetic 3-digit flight number
