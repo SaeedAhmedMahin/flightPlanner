@@ -29,7 +29,7 @@ public:
   RoutingResult run(uint32_t source_id, uint32_t dest_id,
                     const std::vector<std::vector<flight>> &adjacency_list,
                     const std::vector<airport> &nodes, OptimizeFor mode,
-                    uint32_t start_time) {
+                    uint16_t start_time) {
     uint32_t num_nodes = adjacency_list.size();
     std::vector<uint32_t> min_cost(num_nodes, INF);
 
@@ -64,27 +64,29 @@ public:
 
         uint32_t required_departure =
             current.current_time + nodes[current.node_id].min_transfer;
-            
+
         // The first node has no transfer time required
         if (current.node_id == source_id) {
-            required_departure = current.current_time;
+          required_departure = current.current_time;
         }
 
-        uint32_t absolute_flight_departure = edge.flight_day * 1440 + edge.departure_time;
+        uint32_t absolute_flight_departure =
+            edge.flight_day * 1440 + edge.departure_time;
 
         if (absolute_flight_departure < required_departure) {
-            continue; // Missed the flight (or it departed in the past)
+          continue; // Missed the flight (or it departed in the past)
         }
-        
+
         uint32_t wait_time = absolute_flight_departure - current.current_time;
         if (wait_time > 1440) {
-            continue; // Transit is over 24 hours
+          continue; // Transit is over 24 hours
         }
 
         uint32_t flight_duration =
-            (edge.arrival_time + (edge.arrival_time < edge.departure_time ? 1440 : 0)) -
+            (edge.arrival_time +
+             (edge.arrival_time < edge.departure_time ? 1440 : 0)) -
             edge.departure_time;
-        uint32_t next_time = absolute_flight_departure + flight_duration;
+        uint16_t next_time = absolute_flight_departure + flight_duration;
 
         // Determine the optimization metric
         uint32_t new_cost = 0;

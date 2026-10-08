@@ -1,11 +1,11 @@
 #pragma once
 #include <cstdint>
 
-// 12 bytes
+// 8 bytes
 struct SearchState {
   uint32_t total_cost;
   uint16_t node_id;
-  uint32_t current_time;
+  uint16_t current_time;
   // No operator overloading inside the struct at all
 };
 
