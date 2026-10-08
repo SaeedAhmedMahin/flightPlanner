@@ -29,7 +29,7 @@ public:
   RoutingResult run(uint32_t source_id, uint32_t dest_id,
                     const std::vector<std::vector<flight>> &adjacency_list,
                     const std::vector<airport> &nodes, OptimizeFor mode,
-                    uint16_t start_time) {
+                    uint32_t start_time) {
     uint32_t num_nodes = adjacency_list.size();
     std::vector<uint32_t> min_cost(num_nodes, INF);
 
@@ -40,7 +40,7 @@ public:
     std::priority_queue<SearchState, std::vector<SearchState>, CompareCost> pq;
 
     min_cost[source_id] = 0;
-    pq.push({0, static_cast<uint16_t>(source_id), start_time});
+    pq.push({start_time, 0, static_cast<uint16_t>(source_id)});
 
     RoutingMetrics metrics = {0, 0};
 
@@ -86,7 +86,7 @@ public:
             (edge.arrival_time +
              (edge.arrival_time < edge.departure_time ? 1440 : 0)) -
             edge.departure_time;
-        uint16_t next_time = absolute_flight_departure + flight_duration;
+        uint32_t next_time = absolute_flight_departure + flight_duration;
 
         // Determine the optimization metric
         uint32_t new_cost = 0;
@@ -94,6 +94,12 @@ public:
           new_cost = current.total_cost + edge.price;
         } else {
           new_cost = next_time - start_time; // Total elapsed time
+        }
+
+        // Drop routes exceeding 16-bit total_cost capacity ($65,535 or ~45.5
+        // days elapsed)
+        if (new_cost > std::numeric_limits<uint16_t>::max()) {
+          continue;
         }
 
         // Relaxation Step
@@ -104,7 +110,8 @@ public:
           parent_node[next_node] = current.node_id;
           edge_to[next_node] = edge;
 
-          pq.push({new_cost, static_cast<uint16_t>(next_node), next_time});
+          pq.push({start_time, static_cast<uint16_t>(new_cost),
+                   static_cast<uint16_t>(next_node)});
         }
       }
     }
