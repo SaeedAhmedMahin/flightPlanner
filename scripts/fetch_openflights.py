@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
 This fetches our data, we dont have flight price access as they fluctuate a lot, 
-so we are simulating it for now, using 3 factors:
+so we are simulating it for now, using several realistic dynamic pricing factors:
 1. Base price ($40) + Distance fare ($0.10/km) * Airline Premium Multiplier
-2. Add 5% random noise for day-to-day fluctuation
-
-3. Duration: 800km/h + 40 mins (taxi/takeoff/landing)
-
+2. Time-of-Day Curve: Red-eye/night flights (0.50-0.70x) vs. Morning/Evening rush (1.25-1.65x)
+3. Yield Management: Random surges (1.30-1.80x) or flash discounts (0.50-0.70x)
+4. Duration: 800km/h + 40 mins (taxi/takeoff/landing)
 """
 
 import sys
@@ -72,6 +71,30 @@ def get_airline_multiplier(airline_code):
     # Deterministic hash fallback for unknown airlines
     hash_val = int(hashlib.md5(code_str.encode()).hexdigest(), 16)
     return 0.6 + (hash_val % 91) / 100.0
+
+def get_time_of_day_multiplier(departure_time_mins):
+    """
+    Simulates airline dynamic pricing based on time-of-day demand:
+    - Red-eye / Late Night (23:00 - 05:00): Steep discount (0.50 - 0.70x)
+    - Early Morning (05:00 - 07:00): Moderate discount (0.75 - 0.90x)
+    - Morning Peak Rush (07:00 - 09:30): High business demand surge (1.30 - 1.65x)
+    - Daytime / Standard (09:30 - 16:30): Regular demand (0.95 - 1.10x)
+    - Evening Peak Rush (16:30 - 19:30): High business/leisure demand (1.25 - 1.55x)
+    - Late Evening (19:30 - 23:00): Moderate discount (0.80 - 0.95x)
+    """
+    hour = departure_time_mins / 60.0
+    if hour >= 23.0 or hour < 5.0:
+        return random.uniform(0.50, 0.70)  # Red-eye / Night flight
+    elif 5.0 <= hour < 7.0:
+        return random.uniform(0.75, 0.90)  # Early morning
+    elif 7.0 <= hour < 9.5:
+        return random.uniform(1.30, 1.65)  # Morning rush
+    elif 9.5 <= hour < 16.5:
+        return random.uniform(0.95, 1.10)  # Midday regular
+    elif 16.5 <= hour < 19.5:
+        return random.uniform(1.25, 1.55)  # Evening rush
+    else:
+        return random.uniform(0.80, 0.95)  # Late evening
 
 def process_data(raw_dir, proc_dir):
     os.makedirs(proc_dir, exist_ok=True)
@@ -152,20 +175,23 @@ def process_data(raw_dir, proc_dir):
             # Formatted as YYYY-MM-DD
             flight_date_str = flight_date.strftime("%Y-%m-%d")
             
-            # --- YIELD MANAGEMENT SIMULATOR GOES HERE ---
+            # --- YIELD MANAGEMENT & TIME-OF-DAY PRICING ---
+            tod_multiplier = get_time_of_day_multiplier(departure_time)
+
             rand_event = random.random()
             
             if rand_event < 0.15:
-                # 15% chance: Surge Pricing
-                variance = random.uniform(1.5, 2.5)
+                # 15% chance: High-demand surge pricing
+                event_multiplier = random.uniform(1.3, 1.8)
             elif rand_event < 0.25:
-                # 10% chance: Deep Discount
-                variance = random.uniform(0.5, 0.7)
+                # 10% chance: Flash sale / deep discount
+                event_multiplier = random.uniform(0.5, 0.7)
             else:
                 # 75% chance: Standard daily fluctuation
-                variance = random.uniform(0.85, 1.15)
-            
-            final_price = int(base_price * variance)
+                event_multiplier = random.uniform(0.9, 1.1)
+
+            # Combined price reflecting distance, airline brand, time-of-day, and market events
+            final_price = int(base_price * tod_multiplier * event_multiplier)
             final_price = max(15, final_price) # Ensure price never drops below $15
             # --------------------------------------------
             
