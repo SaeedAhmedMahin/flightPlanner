@@ -4,6 +4,7 @@
 - [x] Cache-optimized core structs (`airport` and `flight`)
 - [x] UI Metadata structs (`airportDetails` and `flightDetails`)
 - [ ] Custom Priority Queue (Min-Heap supporting `SearchState`)
+- [ ] store non-dominated Pareto tuples (cost, arrival_time) per airport instead of a single scalar min_cost[node]
 
 ## 2. Data Handling
 - [x] Python Data Fetcher & Cleaner (`fetch_openflights.py`)
