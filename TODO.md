@@ -19,7 +19,8 @@
 - [x] Dijkstra's Algorithm (Baseline control group)
 - [ ] Yen's Algorithm
 - [ ] A* Search (Haversine heuristic)
-- [ ] Bi-directional Dijkstra / A*
+- [x] Bi-directional Dijkstra
+- [ ] Bi-directional A*
 - [ ] Label-Correcting Algorithm (SPPRC Bellman-Ford variant)
 - [ ] The Pulse Algorithm (DFS with bounding and rollback)
 - [ ] Resource-Constrained A* (RC-A* with heuristic look-ahead)
@@ -29,6 +30,8 @@
 - [ ] Contraction Hierarchies (Offline node contraction)
 - [ ] Contraction Hierarchies (Live query)
 - [ ] ALT Preprocessing (Landmark selection & triangle inequality)
+- [ ] Two Phase Router
+- [ ] Two Phase Router with hubs
 
 ## 4. Terminal User Interface (FTXUI)
 - [ ] CMake setup linking FTXUI

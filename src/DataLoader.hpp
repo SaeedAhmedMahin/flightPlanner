@@ -40,6 +40,7 @@ public:
   // Core Algorithmic Graph
   std::vector<airport> nodes;
   std::vector<std::vector<flight>> adjacency_list;
+  std::vector<std::vector<reverse_flight>> reverse_adjacency_list;
   std::unordered_map<std::string, uint32_t> iata_to_id;
 
   // UI Metadata
@@ -54,8 +55,9 @@ public:
                  const std::string &routes_csv) {
     parse_airports(airports_csv);
 
-    // Resize the adjacency list to exactly match the number of airports (V)
+    // Resize adjacency lists to exactly match the number of airports (V)
     adjacency_list.resize(nodes.size());
+    reverse_adjacency_list.resize(nodes.size());
 
     parse_routes(routes_csv);
   }
@@ -199,6 +201,7 @@ private:
           100); // Generate a synthetic 3-digit flight number
 
       adjacency_list[src_id].push_back(f);
+      reverse_adjacency_list[f.destination_id].push_back({f, src_id});
       ui_flights.push_back(ui_f);
     }
     std::cout << "Loaded " << ui_flights.size() << " flight edges.\n";
