@@ -1,5 +1,6 @@
 #include "Algorithms/BidirectionalDijkstra.hpp"
 #include "Algorithms/Dijkstra.hpp"
+#include "Algorithms/TwoPhaseRouter.hpp"
 #include "DataLoader.hpp"
 #include <chrono>
 #include <exception>
@@ -159,6 +160,27 @@ int main() {
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::high_resolution_clock::now() - start);
     benchmarks.push_back({"Bi-Dijkstra", "fastest", duration.count(), res});
+  }
+
+  // 3. Two-Phase Router (Topology-First, Schedule-Second)
+  TwoPhaseRouter two_phase_router;
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = two_phase_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
+        loader.nodes, OptimizeFor::PRICE, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"Two-Phase", "cheapest", duration.count(), res});
+  }
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = two_phase_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
+        loader.nodes, OptimizeFor::TIME, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"Two-Phase", "fastest", duration.count(), res});
   }
 
   // --- OUTPUT ALL PERFORMANCES FIRST ON TOP ---

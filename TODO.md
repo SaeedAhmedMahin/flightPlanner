@@ -17,6 +17,8 @@
 ## 3. Algorithms & Routing
 - [x] Multi-criteria edge weighting (Scalarization: cost vs. time vs. layovers)
 - [x] Dijkstra's Algorithm (Baseline control group)
+- [x] Two-Phase Router (Topology-First Geodesic Corridors + Schedule Sweep)
+- [ ] Two-Phase Router with hubs
 - [ ] Yen's Algorithm
 - [ ] A* Search (Haversine heuristic)
 - [x] Bi-directional Dijkstra
@@ -30,7 +32,7 @@
 - [ ] Contraction Hierarchies (Offline node contraction)
 - [ ] Contraction Hierarchies (Live query)
 - [ ] ALT Preprocessing (Landmark selection & triangle inequality)
-- [ ] Two Phase Router
+
 - [ ] Two Phase Router with hubs
 
 ## 4. Terminal User Interface (FTXUI)

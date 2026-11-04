@@ -49,8 +49,7 @@ FlightRouter-Research/
 │   └── plot_benchmarks.py   # Python/Seaborn scripts for ANOVA, t-tests, and plotting
 ├── include/
 │   ├── Core/                # Graph representation, Date/Time, Flight/Route structures
-│   ├── Algorithms/
-│   │   ├── Queries/         # Live search engines (Dijkstra, A*, Bi-A*, ALT, CH)
+│   ├── Algorithms/          # Routing engines (Dijkstra, Bi-Dijkstra, Two-Phase, A*, etc.)
 │   │   └── Preprocessing/   # Preprocessing (Landmark selection, CH node contraction)
 │   └── TUI/                 # Terminal UI modules, rendering, map visualization
 ├── src/                     # C++ Implementation source files

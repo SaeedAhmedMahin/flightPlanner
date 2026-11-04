@@ -41,6 +41,7 @@ public:
   std::vector<airport> nodes;
   std::vector<std::vector<flight>> adjacency_list;
   std::vector<std::vector<reverse_flight>> reverse_adjacency_list;
+  std::vector<std::vector<uint32_t>> static_route_graph; // Unique airport-to-airport corridors
   std::unordered_map<std::string, uint32_t> iata_to_id;
 
   // UI Metadata
@@ -58,8 +59,21 @@ public:
     // Resize adjacency lists to exactly match the number of airports (V)
     adjacency_list.resize(nodes.size());
     reverse_adjacency_list.resize(nodes.size());
+    static_route_graph.resize(nodes.size());
 
     parse_routes(routes_csv);
+
+    // Build unique static corridor connections
+    for (size_t u = 0; u < adjacency_list.size(); ++u) {
+      std::vector<uint32_t> neighbors;
+      for (const auto &f : adjacency_list[u]) {
+        neighbors.push_back(f.destination_id);
+      }
+      std::sort(neighbors.begin(), neighbors.end());
+      neighbors.erase(std::unique(neighbors.begin(), neighbors.end()),
+                      neighbors.end());
+      static_route_graph[u] = std::move(neighbors);
+    }
   }
 
 private:

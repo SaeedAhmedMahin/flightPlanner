@@ -1,8 +1,7 @@
 CMakeFiles/flight_router.dir/src/main.cpp.o: \
   /Users/saeedahmedmahin/code/flightPlanner/src/main.cpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/BidirectionalDijkstra.hpp \
-  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/Queries/BidirectionalDijkstra.hpp \
-  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/Queries/../../DataStructures/airport.hpp \
+  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/../DataStructures/airport.hpp \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/cstdint \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__config \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__config_site \
@@ -34,9 +33,9 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/sys/_types/_uintptr_t.h \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/_types/_intmax_t.h \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/_types/_uintmax_t.h \
-  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/Queries/../../DataStructures/flight.hpp \
-  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/Queries/../Dijkstra.hpp \
-  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/Queries/../SearchState.hpp \
+  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/../DataStructures/flight.hpp \
+  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/Dijkstra.hpp \
+  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/SearchState.hpp \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/adjacent_find.h \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/comp.h \
@@ -912,7 +911,7 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/sys/_types/_fsfilcnt_t.h \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/_types/_nl_item.h \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/cstdarg \
-  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/Dijkstra.hpp \
+  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/TwoPhaseRouter.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/src/DataLoader.hpp \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/filesystem \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__filesystem/copy_options.h \
