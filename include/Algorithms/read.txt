@@ -1,4 +1,4 @@
 Directory: include/Algorithms/
 Header declarations for graph routing algorithms and preprocessing techniques:
-- Dijkstra.hpp, BidirectionalDijkstra.hpp, TwoPhaseRouter.hpp, SearchState.hpp
+- Dijkstra.hpp, TwoPhaseRouter.hpp, SearchState.hpp
 - Preprocessing/: Preprocessing pipelines (Landmark selection strategies, CH node contraction, shortcut generation).

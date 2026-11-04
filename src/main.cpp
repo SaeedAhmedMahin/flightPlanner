@@ -1,4 +1,3 @@
-#include "Algorithms/BidirectionalDijkstra.hpp"
 #include "Algorithms/Dijkstra.hpp"
 #include "Algorithms/TwoPhaseRouter.hpp"
 #include "DataLoader.hpp"
@@ -139,30 +138,7 @@ int main() {
     benchmarks.push_back({"Dijkstra", "fastest", duration.count(), res});
   }
 
-  // 2. Bidirectional Dijkstra
-  BidirectionalDijkstra bi_dijkstra_router;
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = bi_dijkstra_router.run(
-        source_id, dest_id, loader.adjacency_list,
-        loader.reverse_adjacency_list, loader.nodes, OptimizeFor::PRICE,
-        absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Bi-Dijkstra", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = bi_dijkstra_router.run(
-        source_id, dest_id, loader.adjacency_list,
-        loader.reverse_adjacency_list, loader.nodes, OptimizeFor::TIME,
-        absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Bi-Dijkstra", "fastest", duration.count(), res});
-  }
-
-  // 3. Two-Phase Router (Topology-First, Schedule-Second)
+  // 2. Two-Phase Router (Topology-First, Schedule-Second)
   TwoPhaseRouter two_phase_router;
   {
     auto start = std::chrono::high_resolution_clock::now();

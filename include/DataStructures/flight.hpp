@@ -13,9 +13,3 @@ struct flight {
 
   uint8_t airline_id; // Index for airline penalty heuristics
 };
-
-// Represents an incoming edge for backward graph search (Bidirectional search)
-struct reverse_flight {
-  flight edge;        // The original forward flight
-  uint32_t origin_id; // Where the flight originated
-};

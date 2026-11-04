@@ -28,7 +28,7 @@ public:
   struct Config {
     uint32_t max_hops;
     uint32_t max_corridors;
-    Config(uint32_t hops = 4, uint32_t corridors = 60)
+    Config(uint32_t hops = 4, uint32_t corridors = 100)
         : max_hops(hops), max_corridors(corridors) {}
   };
 
@@ -140,6 +140,9 @@ private:
         continue;
       }
 
+      // current.path.size() is the number of airports visited.
+      // Flight legs (hops) = current.path.size() - 1.
+      // If we already have max_hops legs, we cannot expand to another intermediate node.
       if (current.path.size() > max_hops) {
         continue; // Exceeded hop budget
       }
@@ -163,8 +166,8 @@ private:
         double new_dist_so_far = current.dist_so_far + leg_dist;
         double est_total = new_dist_so_far + h_v;
 
-        // Pruning heuristic: don't fly more than 2.2x the direct great-circle distance
-        if (est_total > h_start * 2.2 + 1000.0) {
+        // Pruning heuristic: don't fly more than 2.5x the direct great-circle distance
+        if (est_total > h_start * 2.5 + 2000.0) {
           continue;
         }
 
@@ -221,24 +224,31 @@ private:
           uint32_t next_price = state.total_price + f.price;
 
           // Pareto dominance check within this localized step:
-          // If a state at v is already cheaper AND arrives earlier, skip this one
+          // If at the final destination airport, cheaper + earlier always dominates.
+          // At intermediate hubs, max transit is 24h (1440m). An arrival >24h earlier
+          // cannot connect to flights available to this state and does not dominate.
+          bool is_final_hop = (hop + 1 == corridor.size() - 1);
           bool dominated = false;
           for (const auto &existing : next_states) {
             if (existing.total_price <= next_price &&
                 existing.current_time <= next_time) {
-              dominated = true;
-              break;
+              if (is_final_hop || (next_time - existing.current_time <= 1440)) {
+                dominated = true;
+                break;
+              }
             }
           }
           if (dominated) continue;
 
           // Prune existing states dominated by this new candidate
           next_states.erase(
-              std::remove_if(next_states.begin(), next_states.end(),
-                             [next_price, next_time](const TimetableState &s) {
-                               return s.total_price >= next_price &&
-                                      s.current_time >= next_time;
-                             }),
+              std::remove_if(
+                  next_states.begin(), next_states.end(),
+                  [is_final_hop, next_price, next_time](const TimetableState &s) {
+                    return s.total_price >= next_price &&
+                           s.current_time >= next_time &&
+                           (is_final_hop || (s.current_time - next_time <= 1440));
+                  }),
               next_states.end());
 
           std::vector<flight> new_path = state.flights_taken;

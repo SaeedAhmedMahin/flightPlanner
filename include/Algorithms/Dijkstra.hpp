@@ -83,12 +83,12 @@ public:
       }
 
       // Stale-state check: if a strictly better label (cheaper on cost AND
-      // arriving earlier) has been accepted at this airport since this state
-      // was enqueued, this state is now dominated and cannot improve any future
-      // leg. We use strict dominance so the state that originally added itself
-      // to pareto_labels does NOT prune itself here.
+      // arriving earlier within the 24h layover window) has been accepted at
+      // this airport since this state was enqueued, this state is now
+      // dominated.
       const Label &curr_label = all_labels[current.label_id];
-      if (is_strictly_dominated(pareto_labels[current.node_id], curr_label.cost,
+      if (is_strictly_dominated(current.node_id, dest_id,
+                                pareto_labels[current.node_id], curr_label.cost,
                                 curr_label.arrival_time)) {
         continue;
       }
@@ -143,16 +143,19 @@ public:
           continue;
         }
 
-        // Pareto dominance check: if any existing label at next_node already
-        // has BOTH a lower-or-equal cost AND an earlier-or-equal arrival time,
-        // this new state cannot improve any downstream leg — discard it.
-        if (is_dominated(pareto_labels[next_node], new_cost, next_time)) {
+        // Pareto dominance check: if an existing label at next_node is both
+        // cheaper and arrives earlier, check if it dominates.
+        // At the final destination: earlier + cheaper always dominates.
+        // At intermediate hubs: max transit is 24h (1440m). An arrival >24h earlier
+        // cannot catch onward flights available to this state and does not dominate.
+        if (is_dominated(next_node, dest_id, pareto_labels[next_node], new_cost,
+                         next_time)) {
           continue;
         }
 
-        // Accept: evict any existing labels at next_node that this state now
-        // dominates, then record the new Pareto point.
-        prune_dominated(pareto_labels[next_node], new_cost, next_time);
+        // Accept: evict any existing labels at next_node that this state dominates
+        prune_dominated(next_node, dest_id, pareto_labels[next_node], new_cost,
+                        next_time);
         pareto_labels[next_node].push_back({new_cost, next_time});
 
         // Create an immutable Label linked to its parent for path tracing
@@ -171,46 +174,51 @@ public:
   }
 
 private:
-  // Returns true if (cost, time) is NON-STRICTLY dominated by any Pareto point.
-  // Used when deciding whether a new candidate at next_node should be enqueued:
-  // if any existing label is <= on BOTH dimensions, the new state is useless.
-  bool is_dominated(const std::vector<ParetoPoint> &labels, uint32_t cost,
+  // Returns true if (cost, time) is dominated by an existing Pareto point.
+  // At destination, the journey is complete: cheaper + earlier always dominates.
+  // At intermediate hubs: max transit is 24h (1440 mins). An arrival >24h earlier
+  // has already expired from the layover window and cannot connect to flights
+  // available to this candidate, so it does not dominate.
+  bool is_dominated(uint32_t node_id, uint32_t dest_id,
+                    const std::vector<ParetoPoint> &labels, uint32_t cost,
                     uint32_t time) const {
     for (const ParetoPoint &p : labels) {
       if (p.cost <= cost && p.arrival_time <= time) {
-        return true;
+        if (node_id == dest_id || (time - p.arrival_time <= 1440)) {
+          return true;
+        }
       }
     }
     return false;
   }
 
-  // Returns true if (cost, time) is STRICTLY dominated — some other Pareto
-  // point is strictly better on at least one dimension and no worse on the
-  // other. Used for the stale-state check on a just-popped state: the state
-  // that originally inserted its own point to pareto_labels will NOT be
-  // strictly dominated by itself, so it correctly gets to relax its edges.
-  bool is_strictly_dominated(const std::vector<ParetoPoint> &labels,
+  // Returns true if (cost, time) is strictly dominated for the stale-state check.
+  bool is_strictly_dominated(uint32_t node_id, uint32_t dest_id,
+                             const std::vector<ParetoPoint> &labels,
                              uint32_t cost, uint32_t time) const {
     for (const ParetoPoint &p : labels) {
       if (p.cost <= cost && p.arrival_time <= time &&
           (p.cost < cost || p.arrival_time < time)) {
-        return true;
+        if (node_id == dest_id || (time - p.arrival_time <= 1440)) {
+          return true;
+        }
       }
     }
     return false;
   }
 
-  // Removes any Pareto points at an airport that are now strictly dominated by
-  // the new (cost, time) pair — they are worse on BOTH dimensions and can
-  // never contribute to a better complete route than the new label can.
-  void prune_dominated(std::vector<ParetoPoint> &labels, uint32_t cost,
+  // Removes any Pareto points at an airport that are strictly dominated by
+  // the new (cost, time) pair within the valid layover window.
+  void prune_dominated(uint32_t node_id, uint32_t dest_id,
+                       std::vector<ParetoPoint> &labels, uint32_t cost,
                        uint32_t time) {
-    labels.erase(std::remove_if(labels.begin(), labels.end(),
-                                [cost, time](const ParetoPoint &p) {
-                                  return p.cost >= cost &&
-                                         p.arrival_time >= time;
-                                }),
-                 labels.end());
+    labels.erase(
+        std::remove_if(labels.begin(), labels.end(),
+                       [node_id, dest_id, cost, time](const ParetoPoint &p) {
+                         return p.cost >= cost && p.arrival_time >= time &&
+                                (node_id == dest_id || (p.arrival_time - time <= 1440));
+                       }),
+        labels.end());
   }
 
   // Walks the parent_label_id chain from the destination label back to the

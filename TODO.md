@@ -21,8 +21,6 @@
 - [ ] Two-Phase Router with hubs
 - [ ] Yen's Algorithm
 - [ ] A* Search (Haversine heuristic)
-- [x] Bi-directional Dijkstra
-- [ ] Bi-directional A*
 - [ ] Label-Correcting Algorithm (SPPRC Bellman-Ford variant)
 - [ ] The Pulse Algorithm (DFS with bounding and rollback)
 - [ ] Resource-Constrained A* (RC-A* with heuristic look-ahead)
