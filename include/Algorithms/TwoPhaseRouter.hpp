@@ -4,6 +4,7 @@
 #include "Dijkstra.hpp" // For OptimizeFor, RoutingMetrics, RoutingResult
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <limits>
 #include <queue>
 #include <vector>
@@ -28,7 +29,7 @@ public:
   struct Config {
     uint32_t max_hops;
     uint32_t max_corridors;
-    Config(uint32_t hops = 5, uint32_t corridors = 200)
+    Config(uint32_t hops = 5, uint32_t corridors = 150)
         : max_hops(hops), max_corridors(corridors) {}
   };
 
@@ -105,10 +106,12 @@ public:
 
 private:
   // Candidate Corridor State for Priority Queue in Phase 1
+  // Stack-allocated path to eliminate all malloc/heap allocations in the PQ
   struct PathCandidate {
     double estimated_total; // Heuristic estimate (cost or distance)
     double score_so_far;    // Accumulated score (cost or distance)
-    std::vector<uint32_t> path;
+    uint8_t path_len;
+    uint32_t path[6]; // Up to 5 hops = at most 6 airports
 
     bool operator>(const PathCandidate &other) const {
       return estimated_total > other.estimated_total;
@@ -134,73 +137,75 @@ private:
         haversine_km(nodes[source_id].latitude, nodes[source_id].longitude,
                      dest_apt.latitude, dest_apt.longitude);
 
+    PathCandidate root;
+    root.score_so_far = 0.0;
+    root.path_len = 1;
+    root.path[0] = source_id;
+
     if (mode == OptimizeFor::PRICE) {
       // Conservative lower bound heuristic for flight fare: $0.025 / km
-      double h_price_start = h_start * 0.025;
-      pq.push({h_price_start, 0.0, {source_id}});
+      root.estimated_total = h_start * 0.025;
+      pq.push(root);
     } else {
       // Flight speed lower bound (~850 km/h -> ~14.1 km/min -> ~0.070 min/km)
-      double h_time_start = h_start * 0.070;
-      pq.push({h_time_start, 0.0, {source_id}});
+      root.estimated_total = h_start * 0.070;
+      pq.push(root);
     }
 
     // Diversification tracking
     std::unordered_map<uint32_t, uint32_t> gateway_count;
-    std::unordered_map<uint32_t, uint32_t> intermediate_count;
-    const uint32_t max_per_gateway = (mode == OptimizeFor::PRICE) ? 15 : 20;
-    const uint32_t max_per_intermediate =
-        (mode == OptimizeFor::PRICE) ? 25 : 35;
+    std::vector<uint8_t> expansions(nodes.size(), 0);
+    std::vector<uint8_t> queued_count(nodes.size(), 0);
+    std::vector<double> best_score(nodes.size(), 1e9);
+    best_score[source_id] = 0.0;
+
+    const uint32_t max_per_gateway = 5;
 
     while (!pq.empty() && corridors.size() < max_corridors) {
       PathCandidate current = pq.top();
       pq.pop();
-      metrics.nodes_explored++;
 
-      uint32_t u = current.path.back();
+      uint32_t u = current.path[current.path_len - 1];
 
       if (u == dest_id) {
-        corridors.push_back(current.path);
-        if (current.path.size() >= 3) {
-          gateway_count[current.path[1]]++;
-          for (size_t i = 1; i + 1 < current.path.size(); ++i) {
-            intermediate_count[current.path[i]]++;
+        // Multi-hop paths (2+ layovers) share the gateway budget to ensure
+        // diversity. Direct 1-stop corridors (Source -> Hub -> Dest) are always
+        // included.
+        if (current.path_len > 3) {
+          uint32_t gw = current.path[1];
+          if (gateway_count[gw] >= max_per_gateway) {
+            continue;
           }
+          gateway_count[gw]++;
         }
+        corridors.push_back(std::vector<uint32_t>(
+            current.path, current.path + current.path_len));
         continue;
       }
 
-      // If this branch already has max corridors via its first gateway, skip
-      // expanding it further
-      if (current.path.size() >= 2) {
-        uint32_t gw = current.path[1];
-        if (gateway_count[gw] >= max_per_gateway) {
-          continue;
-        }
-      }
-
-      // Flight legs (hops) = current.path.size() - 1.
-      if (current.path.size() > max_hops) {
+      if (current.path_len > max_hops) {
         continue; // Exceeded hop budget
       }
+
+      if (expansions[u] >= 4) {
+        continue;
+      }
+      expansions[u]++;
+      metrics.nodes_explored++;
 
       for (size_t edge_idx = 0; edge_idx < static_graph[u].size(); ++edge_idx) {
         uint32_t v = static_graph[u][edge_idx];
 
         // Prevent simple cycles in the corridor
         bool visited = false;
-        for (uint32_t visited_id : current.path) {
-          if (visited_id == v) {
+        for (uint8_t i = 0; i < current.path_len; ++i) {
+          if (current.path[i] == v) {
             visited = true;
             break;
           }
         }
         if (visited)
           continue;
-
-        // Skip intermediate airports that are already over-represented
-        if (v != dest_id && intermediate_count[v] >= max_per_intermediate) {
-          continue;
-        }
 
         double h_v = haversine_km(nodes[v].latitude, nodes[v].longitude,
                                   dest_apt.latitude, dest_apt.longitude);
@@ -213,21 +218,30 @@ private:
           new_score_so_far = current.score_so_far + min_edge_price;
           est_total = new_score_so_far + (h_v * 0.025);
         } else {
-          double leg_dist = haversine_km(nodes[u].latitude, nodes[u].longitude,
-                                         nodes[v].latitude, nodes[v].longitude);
-          new_score_so_far = current.score_so_far + leg_dist;
-          est_total = new_score_so_far + h_v;
-
-          // Pruning heuristic for distance mode: don't fly more than 2.5x
-          // great-circle
-          if (est_total > h_start * 2.5 + 2000.0) {
-            continue;
-          }
+          uint16_t min_edge_dur = static_min_duration[u][edge_idx];
+          new_score_so_far = current.score_so_far + min_edge_dur;
+          est_total = new_score_so_far + (h_v * 0.070);
         }
 
-        std::vector<uint32_t> next_path = current.path;
-        next_path.push_back(v);
-        pq.push({est_total, new_score_so_far, std::move(next_path)});
+        // Suboptimal route pruning to intermediate nodes
+        if (v != dest_id) {
+          if (queued_count[v] >= 4) {
+            continue;
+          }
+          if (new_score_so_far > best_score[v] * 1.30 + 50.0) {
+            continue;
+          }
+          if (new_score_so_far < best_score[v]) {
+            best_score[v] = new_score_so_far;
+          }
+          queued_count[v]++;
+        }
+
+        PathCandidate next = current;
+        next.score_so_far = new_score_so_far;
+        next.estimated_total = est_total;
+        next.path[next.path_len++] = v;
+        pq.push(next);
       }
     }
   }

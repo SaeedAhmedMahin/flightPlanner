@@ -86,7 +86,7 @@ void print_route_path(const RunStats &run, const DataLoader &loader, uint32_t so
               << " -> " << dest_apt.iata_code << "  |  Dep: " << std::setw(5)
               << dep_time << "  |  Arr: " << std::setw(5) << arr_time
               << day_shift << "  |  $" << f.price
-              << (is_dom ? " (incl. $30 dom tax)" : " (incl. $80 intl tax)") << "\n";
+              << (is_dom ? " (incl. $40 dom tax)" : " (incl. $160 intl tax)") << "\n";
   }
 }
 

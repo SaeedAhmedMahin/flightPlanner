@@ -3,6 +3,7 @@
 #include "../DataStructures/flight.hpp"
 #include "SearchState.hpp"
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <queue>
 #include <vector>

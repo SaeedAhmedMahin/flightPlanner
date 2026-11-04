@@ -75,26 +75,26 @@ def get_airline_multiplier(airline_code):
 def get_time_of_day_multiplier(departure_time_mins):
     """
     Simulates airline dynamic pricing based on time-of-day demand:
-    - Red-eye / Late Night (23:00 - 05:00): Steep discount (0.50 - 0.70x)
-    - Early Morning (05:00 - 07:00): Moderate discount (0.75 - 0.90x)
-    - Morning Peak Rush (07:00 - 09:30): High business demand surge (1.30 - 1.65x)
-    - Daytime / Standard (09:30 - 16:30): Regular demand (0.95 - 1.10x)
-    - Evening Peak Rush (16:30 - 19:30): High business/leisure demand (1.25 - 1.55x)
-    - Late Evening (19:30 - 23:00): Moderate discount (0.80 - 0.95x)
+    - Red-eye / Late Night (23:00 - 05:00): Moderate discount (0.80 - 0.90x)
+    - Early Morning (05:00 - 07:00): Slight discount (0.85 - 0.95x)
+    - Morning Peak Rush (07:00 - 09:30): Business demand surge (1.15 - 1.30x)
+    - Daytime / Standard (09:30 - 16:30): Regular demand (0.95 - 1.05x)
+    - Evening Peak Rush (16:30 - 19:30): Business/leisure demand (1.15 - 1.30x)
+    - Late Evening (19:30 - 23:00): Slight discount (0.88 - 0.98x)
     """
     hour = departure_time_mins / 60.0
     if hour >= 23.0 or hour < 5.0:
-        return random.uniform(0.50, 0.70)  # Red-eye / Night flight
+        return random.uniform(0.80, 0.90)  # Red-eye / Night flight
     elif 5.0 <= hour < 7.0:
-        return random.uniform(0.75, 0.90)  # Early morning
+        return random.uniform(0.85, 0.95)  # Early morning
     elif 7.0 <= hour < 9.5:
-        return random.uniform(1.30, 1.65)  # Morning rush
+        return random.uniform(1.15, 1.30)  # Morning rush
     elif 9.5 <= hour < 16.5:
-        return random.uniform(0.95, 1.10)  # Midday regular
+        return random.uniform(0.95, 1.05)  # Midday regular
     elif 16.5 <= hour < 19.5:
-        return random.uniform(1.25, 1.55)  # Evening rush
+        return random.uniform(1.15, 1.30)  # Evening rush
     else:
-        return random.uniform(0.80, 0.95)  # Late evening
+        return random.uniform(0.88, 0.98)  # Late evening
 
 def process_data(raw_dir, proc_dir):
     os.makedirs(proc_dir, exist_ok=True)
@@ -152,11 +152,11 @@ def process_data(raw_dir, proc_dir):
         dist_km = haversine(src_lat, src_lon, dest_lat, dest_lon)
         multiplier = get_airline_multiplier(row["airline"])
         
-        # Sub-linear economy-of-scale base fare: long flights are cheaper per km
-        base_fare = (50.0 + (1.8 * np.sqrt(dist_km)) + (0.04 * dist_km)) * multiplier
+        # Base fare: fixed terminal/dispatch cost + sqrt economy of scale + per-km distance cost
+        base_fare = (60.0 + (1.5 * np.sqrt(dist_km)) + (0.08 * dist_km)) * multiplier
         
-        # Flight tax: $30 for domestic, $80 for international flights
-        flight_tax = 30 if src_country == dest_country else 80
+        # Flight tax: $40 for domestic, $160 for international flights (customs, terminal & departure security fees)
+        flight_tax = 40 if src_country == dest_country else 160
         
         raw_duration = (dist_km / 800.0) * 60 + 40
         duration_mins = int(round(raw_duration / 5.0) * 5)
@@ -188,13 +188,13 @@ def process_data(raw_dir, proc_dir):
             
             if rand_event < 0.15:
                 # 15% chance: High-demand surge pricing
-                event_multiplier = random.uniform(1.3, 1.8)
+                event_multiplier = random.uniform(1.15, 1.35)
             elif rand_event < 0.25:
-                # 10% chance: Flash sale / deep discount
-                event_multiplier = random.uniform(0.5, 0.7)
+                # 10% chance: Flash sale / discount
+                event_multiplier = random.uniform(0.80, 0.90)
             else:
                 # 75% chance: Standard daily fluctuation
-                event_multiplier = random.uniform(0.9, 1.1)
+                event_multiplier = random.uniform(0.95, 1.05)
 
             # Base price with time-of-day and yield management surge/discount, plus baked-in flight tax
             ticket_price = int((base_fare * tod_multiplier * event_multiplier) + flight_tax)
