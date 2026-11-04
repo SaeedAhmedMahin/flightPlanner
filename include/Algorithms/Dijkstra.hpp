@@ -31,6 +31,7 @@ struct RoutingResult {
 struct ParetoPoint {
   uint32_t cost;
   uint32_t arrival_time;
+  uint8_t hops;
 };
 // SearchState (with label_id), CompareCost, and Label are defined in
 // SearchState.hpp and included above.
@@ -42,7 +43,7 @@ public:
   RoutingResult run(uint32_t source_id, uint32_t dest_id,
                     const std::vector<std::vector<flight>> &adjacency_list,
                     const std::vector<airport> &nodes, OptimizeFor mode,
-                    uint32_t start_time) {
+                    uint32_t start_time, uint8_t max_hops = 5) {
     uint32_t num_nodes = adjacency_list.size();
 
     // pareto_labels[airport_id] holds all currently non-dominated
@@ -65,9 +66,14 @@ public:
     // Seed: source airport with zero cost and the user-supplied query time.
     // label_id = -1 signals the chain root (no parent edge).
     int32_t source_label_id = static_cast<int32_t>(all_labels.size());
-    all_labels.push_back(Label{source_id, 0, start_time, -1, flight{}});
-    pareto_labels[source_id].push_back({0, start_time});
-    pq.push({start_time, source_label_id, 0, static_cast<uint16_t>(source_id)});
+    all_labels.push_back(Label{source_id, 0, start_time, -1, flight{}, 0});
+    pareto_labels[source_id].push_back({0, start_time, 0});
+    pq.push({start_time,
+             source_label_id,
+             0,
+             static_cast<uint16_t>(source_id),
+             0,
+             {0, 0, 0}});
 
     RoutingMetrics metrics = {0, 0};
 
@@ -79,7 +85,8 @@ public:
       // Early exit: first time we pop the destination it is the optimal route
       // for the primary criterion (cost or time) by Dijkstra's guarantee.
       if (current.node_id == dest_id) {
-        return reconstruct_path(current, all_labels, start_time, metrics);
+        return reconstruct_path(current, all_labels, nodes, start_time,
+                                metrics);
       }
 
       // Stale-state check: if a strictly better label (cheaper on cost AND
@@ -89,7 +96,13 @@ public:
       const Label &curr_label = all_labels[current.label_id];
       if (is_strictly_dominated(current.node_id, dest_id,
                                 pareto_labels[current.node_id], curr_label.cost,
-                                curr_label.arrival_time)) {
+                                curr_label.arrival_time, current.hops)) {
+        continue;
+      }
+
+      // If we've already reached max_hops legs, cannot expand further onward
+      // legs
+      if (current.hops >= max_hops) {
         continue;
       }
 
@@ -143,30 +156,38 @@ public:
           continue;
         }
 
+        uint8_t next_hops = current.hops + 1;
+
         // Pareto dominance check: if an existing label at next_node is both
-        // cheaper and arrives earlier, check if it dominates.
-        // At the final destination: earlier + cheaper always dominates.
-        // At intermediate hubs: max transit is 24h (1440m). An arrival >24h earlier
-        // cannot catch onward flights available to this state and does not dominate.
+        // cheaper, arrives earlier, and has <= hops, check if it dominates.
+        // At the final destination: earlier + cheaper + <= hops always
+        // dominates. At intermediate hubs: max transit is 24h (1440m). An
+        // arrival >24h earlier cannot catch onward flights available to this
+        // state and does not dominate.
         if (is_dominated(next_node, dest_id, pareto_labels[next_node], new_cost,
-                         next_time)) {
+                         next_time, next_hops)) {
           continue;
         }
 
-        // Accept: evict any existing labels at next_node that this state dominates
+        // Accept: evict any existing labels at next_node that this state
+        // dominates
         prune_dominated(next_node, dest_id, pareto_labels[next_node], new_cost,
-                        next_time);
-        pareto_labels[next_node].push_back({new_cost, next_time});
+                        next_time, next_hops);
+        pareto_labels[next_node].push_back({new_cost, next_time, next_hops});
 
         // Create an immutable Label linked to its parent for path tracing
         int32_t new_label_id = static_cast<int32_t>(all_labels.size());
-        all_labels.push_back(
-            Label{next_node, new_cost, next_time, current.label_id, edge});
+        all_labels.push_back(Label{next_node, new_cost, next_time,
+                                   current.label_id, edge, next_hops});
 
         // next_time becomes current_time for this new state so that the next
         // iteration has the correct arrival time for transfer window checks.
-        pq.push({next_time, new_label_id, static_cast<uint16_t>(new_cost),
-                 static_cast<uint16_t>(next_node)});
+        pq.push({next_time,
+                 new_label_id,
+                 static_cast<uint16_t>(new_cost),
+                 static_cast<uint16_t>(next_node),
+                 next_hops,
+                 {0, 0, 0}});
       }
     }
 
@@ -174,16 +195,16 @@ public:
   }
 
 private:
-  // Returns true if (cost, time) is dominated by an existing Pareto point.
-  // At destination, the journey is complete: cheaper + earlier always dominates.
-  // At intermediate hubs: max transit is 24h (1440 mins). An arrival >24h earlier
-  // has already expired from the layover window and cannot connect to flights
-  // available to this candidate, so it does not dominate.
+  // Returns true if (cost, time, hops) is dominated by an existing Pareto
+  // point. At destination, the journey is complete: cheaper + earlier + <= hops
+  // always dominates. At intermediate hubs: max transit is 24h (1440 mins). An
+  // arrival >24h earlier has already expired from the layover window and cannot
+  // connect to flights available to this candidate, so it does not dominate.
   bool is_dominated(uint32_t node_id, uint32_t dest_id,
                     const std::vector<ParetoPoint> &labels, uint32_t cost,
-                    uint32_t time) const {
+                    uint32_t time, uint8_t hops) const {
     for (const ParetoPoint &p : labels) {
-      if (p.cost <= cost && p.arrival_time <= time) {
+      if (p.cost <= cost && p.arrival_time <= time && p.hops <= hops) {
         if (node_id == dest_id || (time - p.arrival_time <= 1440)) {
           return true;
         }
@@ -192,13 +213,14 @@ private:
     return false;
   }
 
-  // Returns true if (cost, time) is strictly dominated for the stale-state check.
+  // Returns true if (cost, time, hops) is strictly dominated for the
+  // stale-state check.
   bool is_strictly_dominated(uint32_t node_id, uint32_t dest_id,
                              const std::vector<ParetoPoint> &labels,
-                             uint32_t cost, uint32_t time) const {
+                             uint32_t cost, uint32_t time, uint8_t hops) const {
     for (const ParetoPoint &p : labels) {
-      if (p.cost <= cost && p.arrival_time <= time &&
-          (p.cost < cost || p.arrival_time < time)) {
+      if (p.cost <= cost && p.arrival_time <= time && p.hops <= hops &&
+          (p.cost < cost || p.arrival_time < time || p.hops < hops)) {
         if (node_id == dest_id || (time - p.arrival_time <= 1440)) {
           return true;
         }
@@ -208,16 +230,18 @@ private:
   }
 
   // Removes any Pareto points at an airport that are strictly dominated by
-  // the new (cost, time) pair within the valid layover window.
+  // the new (cost, time, hops) tuple within the valid layover window.
   void prune_dominated(uint32_t node_id, uint32_t dest_id,
                        std::vector<ParetoPoint> &labels, uint32_t cost,
-                       uint32_t time) {
+                       uint32_t time, uint8_t hops) {
     labels.erase(
-        std::remove_if(labels.begin(), labels.end(),
-                       [node_id, dest_id, cost, time](const ParetoPoint &p) {
-                         return p.cost >= cost && p.arrival_time >= time &&
-                                (node_id == dest_id || (p.arrival_time - time <= 1440));
-                       }),
+        std::remove_if(
+            labels.begin(), labels.end(),
+            [node_id, dest_id, cost, time, hops](const ParetoPoint &p) {
+              return p.cost >= cost && p.arrival_time >= time &&
+                     p.hops >= hops &&
+                     (node_id == dest_id || (p.arrival_time - time <= 1440));
+            }),
         labels.end());
   }
 
@@ -225,6 +249,7 @@ private:
   // source to reconstruct the exact sequence of flights taken.
   RoutingResult reconstruct_path(const SearchState &final_state,
                                  const std::vector<Label> &all_labels,
+                                 const std::vector<airport> &nodes,
                                  uint32_t start_time,
                                  RoutingMetrics metrics) const {
     RoutingResult result;
@@ -240,8 +265,14 @@ private:
     while (curr_id != -1 && all_labels[curr_id].parent_label_id != -1) {
       const Label &lbl = all_labels[curr_id];
       result.path.push_back(lbl.edge_taken);
+
+      int32_t parent_id = lbl.parent_label_id;
+      uint32_t origin_node = all_labels[parent_id].airport_id;
+      uint32_t dest_node = lbl.airport_id;
+
       result.total_price += lbl.edge_taken.price;
-      curr_id = lbl.parent_label_id;
+
+      curr_id = parent_id;
     }
 
     // The path is traced backwards from destination to source, so we flip it

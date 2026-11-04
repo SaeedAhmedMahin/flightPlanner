@@ -50,7 +50,7 @@ void print_performance_summary(const std::vector<RunStats> &benchmarks) {
   std::cout << "======================================================\n";
 }
 
-void print_route_path(const RunStats &run, const DataLoader &loader) {
+void print_route_path(const RunStats &run, const DataLoader &loader, uint32_t source_id) {
   std::cout << "\n=== " << run.algo_name << " [" << run.mode_label << "] ROUTE ===\n";
   if (!run.result.success) {
     std::cout << "Status: No valid route found.\n";
@@ -58,13 +58,20 @@ void print_route_path(const RunStats &run, const DataLoader &loader) {
   }
 
   std::cout << "Total Price: $" << run.result.total_price
-            << "  |  Total Time: " << run.result.total_time_mins / 60 << "h "
+            << "  |  Total Time: "
+            << run.result.total_time_mins / 60 << "h "
             << run.result.total_time_mins % 60 << "m\n";
   std::cout << "------------------------------------------------------\n";
 
-  for (const flight &f : run.result.path) {
+  uint32_t prev_apt = source_id;
+
+  for (size_t i = 0; i < run.result.path.size(); ++i) {
+    const flight &f = run.result.path[i];
     const flightDetails &f_ui = loader.ui_flights[f.flight_details_id];
     const airportDetails &dest_apt = loader.ui_nodes[f.destination_id];
+
+    bool is_dom = (loader.nodes[prev_apt].country_id == loader.nodes[f.destination_id].country_id);
+    prev_apt = f.destination_id;
 
     std::string dep_time = std::to_string(f.departure_time / 60) + ":" +
                            (f.departure_time % 60 < 10 ? "0" : "") +
@@ -78,7 +85,8 @@ void print_route_path(const RunStats &run, const DataLoader &loader) {
     std::cout << "Flight " << f_ui.airline_code << " " << f_ui.flight_number
               << " -> " << dest_apt.iata_code << "  |  Dep: " << std::setw(5)
               << dep_time << "  |  Arr: " << std::setw(5) << arr_time
-              << day_shift << "  |  $" << f.price << "\n";
+              << day_shift << "  |  $" << f.price
+              << (is_dom ? " (incl. $30 dom tax)" : " (incl. $80 intl tax)") << "\n";
   }
 }
 
@@ -144,6 +152,7 @@ int main() {
     auto start = std::chrono::high_resolution_clock::now();
     RoutingResult res = two_phase_router.run(
         source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
+        loader.static_route_min_price, loader.static_route_min_duration,
         loader.nodes, OptimizeFor::PRICE, absolute_start_time);
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::high_resolution_clock::now() - start);
@@ -153,6 +162,7 @@ int main() {
     auto start = std::chrono::high_resolution_clock::now();
     RoutingResult res = two_phase_router.run(
         source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
+        loader.static_route_min_price, loader.static_route_min_duration,
         loader.nodes, OptimizeFor::TIME, absolute_start_time);
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::high_resolution_clock::now() - start);
@@ -164,7 +174,7 @@ int main() {
 
   // --- OUTPUT DETAILED PATHS BELOW ---
   for (const auto &run : benchmarks) {
-    print_route_path(run, loader);
+    print_route_path(run, loader, source_id);
   }
 
   return 0;

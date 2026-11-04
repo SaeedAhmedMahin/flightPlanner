@@ -42,6 +42,10 @@ public:
   std::vector<std::vector<flight>> adjacency_list;
   std::vector<std::vector<uint32_t>>
       static_route_graph; // Unique airport-to-airport corridors
+  std::vector<std::vector<uint16_t>>
+      static_route_min_price; // Minimum ticket price on each corridor (aligned with static_route_graph)
+  std::vector<std::vector<uint16_t>>
+      static_route_min_duration; // Minimum flight duration in mins on each corridor (aligned with static_route_graph)
   std::unordered_map<std::string, uint32_t> iata_to_id;
 
   // UI Metadata
@@ -59,19 +63,50 @@ public:
     // Resize adjacency lists to exactly match the number of airports (V)
     adjacency_list.resize(nodes.size());
     static_route_graph.resize(nodes.size());
+    static_route_min_price.resize(nodes.size());
+    static_route_min_duration.resize(nodes.size());
 
     parse_routes(routes_csv);
 
-    // Build unique static corridor connections
+    // Build unique static corridor connections with minimum route price and duration
     for (size_t u = 0; u < adjacency_list.size(); ++u) {
-      std::vector<uint32_t> neighbors;
+      struct EdgeStats {
+        uint16_t min_price;
+        uint16_t min_duration;
+      };
+      std::unordered_map<uint32_t, EdgeStats> dest_stats;
+
       for (const auto &f : adjacency_list[u]) {
-        neighbors.push_back(f.destination_id);
+        uint16_t dur = (f.arrival_time + (f.arrival_time < f.departure_time ? 1440 : 0)) - f.departure_time;
+        auto it = dest_stats.find(f.destination_id);
+        if (it == dest_stats.end()) {
+          dest_stats[f.destination_id] = {f.price, dur};
+        } else {
+          if (f.price < it->second.min_price) it->second.min_price = f.price;
+          if (dur < it->second.min_duration) it->second.min_duration = dur;
+        }
+      }
+
+      std::vector<uint32_t> neighbors;
+      std::vector<uint16_t> min_prices;
+      std::vector<uint16_t> min_durations;
+      neighbors.reserve(dest_stats.size());
+      min_prices.reserve(dest_stats.size());
+      min_durations.reserve(dest_stats.size());
+
+      for (const auto &pair : dest_stats) {
+        neighbors.push_back(pair.first);
       }
       std::sort(neighbors.begin(), neighbors.end());
-      neighbors.erase(std::unique(neighbors.begin(), neighbors.end()),
-                      neighbors.end());
+
+      for (uint32_t v : neighbors) {
+        min_prices.push_back(dest_stats[v].min_price);
+        min_durations.push_back(dest_stats[v].min_duration);
+      }
+
       static_route_graph[u] = std::move(neighbors);
+      static_route_min_price[u] = std::move(min_prices);
+      static_route_min_duration[u] = std::move(min_durations);
     }
   }
 
@@ -157,6 +192,7 @@ private:
       apt.id = id;
       apt.latitude = lat;
       apt.longitude = lon;
+      apt.country_id = static_cast<uint8_t>(get_country_idx(cols[3]));
       apt.ch_rank = 0; // Set later during CH preprocessing
       apt.utc_offset_15m = static_cast<int8_t>(std::round(utc * 4.0f));
       apt.min_transfer = 45; // Default layover penalty

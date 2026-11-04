@@ -142,15 +142,21 @@ def process_data(raw_dir, proc_dir):
         src_lat = df_airports.loc[src_id, "lat"]
         src_lon = df_airports.loc[src_id, "lon"]
         src_utc = float(df_airports.loc[src_id, "utc_offset"])
+        src_country = df_airports.loc[src_id, "country"]
         
         dest_lat = df_airports.loc[dest_id, "lat"]
         dest_lon = df_airports.loc[dest_id, "lon"]
         dest_utc = float(df_airports.loc[dest_id, "utc_offset"])
+        dest_country = df_airports.loc[dest_id, "country"]
         
         dist_km = haversine(src_lat, src_lon, dest_lat, dest_lon)
         multiplier = get_airline_multiplier(row["airline"])
         
-        base_price = (40 + (dist_km * 0.10)) * multiplier
+        # Sub-linear economy-of-scale base fare: long flights are cheaper per km
+        base_fare = (50.0 + (1.8 * np.sqrt(dist_km)) + (0.04 * dist_km)) * multiplier
+        
+        # Flight tax: $30 for domestic, $80 for international flights
+        flight_tax = 30 if src_country == dest_country else 80
         
         raw_duration = (dist_km / 800.0) * 60 + 40
         duration_mins = int(round(raw_duration / 5.0) * 5)
@@ -190,9 +196,9 @@ def process_data(raw_dir, proc_dir):
                 # 75% chance: Standard daily fluctuation
                 event_multiplier = random.uniform(0.9, 1.1)
 
-            # Combined price reflecting distance, airline brand, time-of-day, and market events
-            final_price = int(base_price * tod_multiplier * event_multiplier)
-            final_price = max(15, final_price) # Ensure price never drops below $15
+            # Base price with time-of-day and yield management surge/discount, plus baked-in flight tax
+            ticket_price = int((base_fare * tod_multiplier * event_multiplier) + flight_tax)
+            ticket_price = max(25, ticket_price) # Ensure ticket price never drops below $25
             # --------------------------------------------
             
             expanded_routes.append({
@@ -200,7 +206,7 @@ def process_data(raw_dir, proc_dir):
                 "dense_dest_id": dest_id,
                 "airline": row["airline"],
                 "equipment": row["equipment"] if pd.notna(row["equipment"]) else "UNK",
-                "price_usd": final_price,
+                "price_usd": ticket_price,
                 "flight_date": flight_date_str,
                 "duration_mins": duration_mins,
                 "departure_time": departure_time,

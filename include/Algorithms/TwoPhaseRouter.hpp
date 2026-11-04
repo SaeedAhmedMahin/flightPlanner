@@ -28,7 +28,7 @@ public:
   struct Config {
     uint32_t max_hops;
     uint32_t max_corridors;
-    Config(uint32_t hops = 4, uint32_t corridors = 100)
+    Config(uint32_t hops = 5, uint32_t corridors = 200)
         : max_hops(hops), max_corridors(corridors) {}
   };
 
@@ -49,10 +49,12 @@ public:
     return R * c;
   }
 
-  RoutingResult run(
-      uint32_t source_id, uint32_t dest_id,
+  RoutingResult
+  run(uint32_t source_id, uint32_t dest_id,
       const std::vector<std::vector<flight>> &adjacency_list,
       const std::vector<std::vector<uint32_t>> &static_route_graph,
+      const std::vector<std::vector<uint16_t>> &static_route_min_price,
+      const std::vector<std::vector<uint16_t>> &static_route_min_duration,
       const std::vector<airport> &nodes, OptimizeFor mode, uint32_t start_time,
       Config config = Config{}) {
 
@@ -66,13 +68,17 @@ public:
     // PHASE 1: DISCOVER TOPOLOGICAL AIRPORT CORRIDORS
     // =========================================================================
     // Find candidate sequences of airport IDs: [source_id, ..., dest_id]
-    // using Geodesic-guided bounded search on static_route_graph.
+    // using mode-aligned bounded search:
+    // - For PRICE mode: cost-guided search on minimum flight fare per corridor
+    // - For TIME mode: duration-guided search on minimum flight duration per
+    // corridor
     std::vector<std::vector<uint32_t>> corridors;
     corridors.reserve(config.max_corridors);
 
-    find_candidate_corridors(source_id, dest_id, static_route_graph, nodes,
-                             config.max_hops, config.max_corridors, corridors,
-                             metrics);
+    find_candidate_corridors(source_id, dest_id, static_route_graph,
+                             static_route_min_price, static_route_min_duration,
+                             nodes, mode, config.max_hops, config.max_corridors,
+                             corridors, metrics);
 
     if (corridors.empty()) {
       return {false, 0, 0, {}, metrics};
@@ -100,33 +106,50 @@ public:
 private:
   // Candidate Corridor State for Priority Queue in Phase 1
   struct PathCandidate {
-    double estimated_total_dist; // Distance so far + Haversine to dest
-    double dist_so_far;
+    double estimated_total; // Heuristic estimate (cost or distance)
+    double score_so_far;    // Accumulated score (cost or distance)
     std::vector<uint32_t> path;
 
     bool operator>(const PathCandidate &other) const {
-      return estimated_total_dist > other.estimated_total_dist;
+      return estimated_total > other.estimated_total;
     }
   };
 
   void find_candidate_corridors(
       uint32_t source_id, uint32_t dest_id,
       const std::vector<std::vector<uint32_t>> &static_graph,
-      const std::vector<airport> &nodes, uint32_t max_hops,
+      const std::vector<std::vector<uint16_t>> &static_min_price,
+      const std::vector<std::vector<uint16_t>> &static_min_duration,
+      const std::vector<airport> &nodes, OptimizeFor mode, uint32_t max_hops,
       uint32_t max_corridors, std::vector<std::vector<uint32_t>> &corridors,
       RoutingMetrics &metrics) {
 
     const airport &dest_apt = nodes[dest_id];
 
-    // Priority queue of partial paths ordered by estimated geographic distance
     std::priority_queue<PathCandidate, std::vector<PathCandidate>,
                         std::greater<PathCandidate>>
         pq;
 
-    double h_start = haversine_km(nodes[source_id].latitude,
-                                  nodes[source_id].longitude, dest_apt.latitude,
-                                  dest_apt.longitude);
-    pq.push({h_start, 0.0, {source_id}});
+    double h_start =
+        haversine_km(nodes[source_id].latitude, nodes[source_id].longitude,
+                     dest_apt.latitude, dest_apt.longitude);
+
+    if (mode == OptimizeFor::PRICE) {
+      // Conservative lower bound heuristic for flight fare: $0.025 / km
+      double h_price_start = h_start * 0.025;
+      pq.push({h_price_start, 0.0, {source_id}});
+    } else {
+      // Flight speed lower bound (~850 km/h -> ~14.1 km/min -> ~0.070 min/km)
+      double h_time_start = h_start * 0.070;
+      pq.push({h_time_start, 0.0, {source_id}});
+    }
+
+    // Diversification tracking
+    std::unordered_map<uint32_t, uint32_t> gateway_count;
+    std::unordered_map<uint32_t, uint32_t> intermediate_count;
+    const uint32_t max_per_gateway = (mode == OptimizeFor::PRICE) ? 15 : 20;
+    const uint32_t max_per_intermediate =
+        (mode == OptimizeFor::PRICE) ? 25 : 35;
 
     while (!pq.empty() && corridors.size() < max_corridors) {
       PathCandidate current = pq.top();
@@ -137,17 +160,32 @@ private:
 
       if (u == dest_id) {
         corridors.push_back(current.path);
+        if (current.path.size() >= 3) {
+          gateway_count[current.path[1]]++;
+          for (size_t i = 1; i + 1 < current.path.size(); ++i) {
+            intermediate_count[current.path[i]]++;
+          }
+        }
         continue;
       }
 
-      // current.path.size() is the number of airports visited.
+      // If this branch already has max corridors via its first gateway, skip
+      // expanding it further
+      if (current.path.size() >= 2) {
+        uint32_t gw = current.path[1];
+        if (gateway_count[gw] >= max_per_gateway) {
+          continue;
+        }
+      }
+
       // Flight legs (hops) = current.path.size() - 1.
-      // If we already have max_hops legs, we cannot expand to another intermediate node.
       if (current.path.size() > max_hops) {
         continue; // Exceeded hop budget
       }
 
-      for (uint32_t v : static_graph[u]) {
+      for (size_t edge_idx = 0; edge_idx < static_graph[u].size(); ++edge_idx) {
+        uint32_t v = static_graph[u][edge_idx];
+
         // Prevent simple cycles in the corridor
         bool visited = false;
         for (uint32_t visited_id : current.path) {
@@ -156,24 +194,40 @@ private:
             break;
           }
         }
-        if (visited) continue;
+        if (visited)
+          continue;
 
-        double leg_dist = haversine_km(nodes[u].latitude, nodes[u].longitude,
-                                       nodes[v].latitude, nodes[v].longitude);
+        // Skip intermediate airports that are already over-represented
+        if (v != dest_id && intermediate_count[v] >= max_per_intermediate) {
+          continue;
+        }
+
         double h_v = haversine_km(nodes[v].latitude, nodes[v].longitude,
                                   dest_apt.latitude, dest_apt.longitude);
 
-        double new_dist_so_far = current.dist_so_far + leg_dist;
-        double est_total = new_dist_so_far + h_v;
+        double new_score_so_far = 0;
+        double est_total = 0;
 
-        // Pruning heuristic: don't fly more than 2.5x the direct great-circle distance
-        if (est_total > h_start * 2.5 + 2000.0) {
-          continue;
+        if (mode == OptimizeFor::PRICE) {
+          uint16_t min_edge_price = static_min_price[u][edge_idx];
+          new_score_so_far = current.score_so_far + min_edge_price;
+          est_total = new_score_so_far + (h_v * 0.025);
+        } else {
+          double leg_dist = haversine_km(nodes[u].latitude, nodes[u].longitude,
+                                         nodes[v].latitude, nodes[v].longitude);
+          new_score_so_far = current.score_so_far + leg_dist;
+          est_total = new_score_so_far + h_v;
+
+          // Pruning heuristic for distance mode: don't fly more than 2.5x
+          // great-circle
+          if (est_total > h_start * 2.5 + 2000.0) {
+            continue;
+          }
         }
 
         std::vector<uint32_t> next_path = current.path;
         next_path.push_back(v);
-        pq.push({est_total, new_dist_so_far, std::move(next_path)});
+        pq.push({est_total, new_score_so_far, std::move(next_path)});
       }
     }
   }
@@ -185,11 +239,11 @@ private:
     std::vector<flight> flights_taken;
   };
 
-  void evaluate_corridor(
-      const std::vector<uint32_t> &corridor,
-      const std::vector<std::vector<flight>> &adjacency_list,
-      const std::vector<airport> &nodes, OptimizeFor mode, uint32_t start_time,
-      RoutingResult &best_result, RoutingMetrics &metrics) {
+  void evaluate_corridor(const std::vector<uint32_t> &corridor,
+                         const std::vector<std::vector<flight>> &adjacency_list,
+                         const std::vector<airport> &nodes, OptimizeFor mode,
+                         uint32_t start_time, RoutingResult &best_result,
+                         RoutingMetrics &metrics) {
 
     // States at the current airport along the corridor
     std::vector<TimetableState> current_states;
@@ -204,29 +258,34 @@ private:
       for (const auto &state : current_states) {
         uint32_t req_dep = state.current_time + nodes[u].min_transfer;
         if (hop == 0) {
-          req_dep = state.current_time; // First departure has no transfer penalty
+          req_dep =
+              state.current_time; // First departure has no transfer penalty
         }
 
         for (const flight &f : adjacency_list[u]) {
-          if (f.destination_id != v) continue;
+          if (f.destination_id != v)
+            continue;
           metrics.edges_relaxed++;
 
           uint32_t abs_dep = f.flight_day * 1440 + f.departure_time;
-          if (abs_dep < req_dep) continue;
+          if (abs_dep < req_dep)
+            continue;
 
           uint32_t wait_time = abs_dep - state.current_time;
-          if (wait_time > 1440) continue; // Layover over 24h
+          if (wait_time > 1440)
+            continue; // Layover over 24h
 
-          uint32_t duration =
-              (f.arrival_time + (f.arrival_time < f.departure_time ? 1440 : 0)) -
-              f.departure_time;
+          uint32_t duration = (f.arrival_time +
+                               (f.arrival_time < f.departure_time ? 1440 : 0)) -
+                              f.departure_time;
           uint32_t next_time = abs_dep + duration;
           uint32_t next_price = state.total_price + f.price;
 
           // Pareto dominance check within this localized step:
-          // If at the final destination airport, cheaper + earlier always dominates.
-          // At intermediate hubs, max transit is 24h (1440m). An arrival >24h earlier
-          // cannot connect to flights available to this state and does not dominate.
+          // If at the final destination airport, cheaper + earlier always
+          // dominates. At intermediate hubs, max transit is 24h (1440m). An
+          // arrival >24h earlier cannot connect to flights available to this
+          // state and does not dominate.
           bool is_final_hop = (hop + 1 == corridor.size() - 1);
           bool dominated = false;
           for (const auto &existing : next_states) {
@@ -238,17 +297,19 @@ private:
               }
             }
           }
-          if (dominated) continue;
+          if (dominated)
+            continue;
 
           // Prune existing states dominated by this new candidate
           next_states.erase(
-              std::remove_if(
-                  next_states.begin(), next_states.end(),
-                  [is_final_hop, next_price, next_time](const TimetableState &s) {
-                    return s.total_price >= next_price &&
-                           s.current_time >= next_time &&
-                           (is_final_hop || (s.current_time - next_time <= 1440));
-                  }),
+              std::remove_if(next_states.begin(), next_states.end(),
+                             [is_final_hop, next_price,
+                              next_time](const TimetableState &s) {
+                               return s.total_price >= next_price &&
+                                      s.current_time >= next_time &&
+                                      (is_final_hop ||
+                                       (s.current_time - next_time <= 1440));
+                             }),
               next_states.end());
 
           std::vector<flight> new_path = state.flights_taken;
