@@ -20,7 +20,7 @@
 - [x] Two-Phase Router (Topology-First Geodesic Corridors + Schedule Sweep)
 - [ ] Two-Phase Router with hubs
 - [ ] Yen's Algorithm
-- [ ] A* Search (Haversine heuristic)
+- [x] A* Search (Haversine heuristic)
 - [ ] Label-Correcting Algorithm (SPPRC Bellman-Ford variant)
 - [ ] The Pulse Algorithm (DFS with bounding and rollback)
 - [ ] Resource-Constrained A* (RC-A* with heuristic look-ahead)

@@ -1,4 +1,5 @@
 #include "Algorithms/Dijkstra.hpp"
+#include "Algorithms/AStar.hpp"
 #include "Algorithms/TwoPhaseRouter.hpp"
 #include "DataLoader.hpp"
 #include <chrono>
@@ -146,7 +147,28 @@ int main() {
     benchmarks.push_back({"Dijkstra", "fastest", duration.count(), res});
   }
 
-  // 2. Two-Phase Router (Topology-First, Schedule-Second)
+  // 2. A* Search (Heuristic-Guided Pareto Search)
+  AStar astar_router;
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = astar_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        OptimizeFor::PRICE, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"A*", "cheapest", duration.count(), res});
+  }
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = astar_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        OptimizeFor::TIME, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"A*", "fastest", duration.count(), res});
+  }
+
+  // 3. Two-Phase Router (Topology-First, Schedule-Second)
   TwoPhaseRouter two_phase_router;
   {
     auto start = std::chrono::high_resolution_clock::now();
