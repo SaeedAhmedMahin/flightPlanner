@@ -27,10 +27,10 @@ struct SearchState {
 };
 static_assert(sizeof(SearchState) == 16, "SearchState must be 16 bytes");
 
-// Min-heap comparator: lowest total_cost is explored first
+// Min-heap comparator: returns true if 'a' has higher priority than 'b' (lower total_cost)
 struct CompareCost {
   bool operator()(const SearchState &a, const SearchState &b) const {
-    return a.total_cost > b.total_cost; // > creates a Min-Heap
+    return a.total_cost < b.total_cost;
   }
 };
 

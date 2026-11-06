@@ -3,7 +3,7 @@
 ## 1. Basics & Data Structures
 - [x] Cache-optimized core structs (`airport` and `flight`)
 - [x] UI Metadata structs (`airportDetails` and `flightDetails`)
-- [ ] Custom Priority Queue (Min-Heap supporting `SearchState`)
+- [x] Custom Priority Queue (Min-Heap supporting `SearchState`)
 - [x] store non-dominated Pareto tuples (cost, arrival_time) per airport instead of a single scalar min_cost[node]
 
 ## 2. Data Handling
@@ -17,6 +17,7 @@
 ## 3. Algorithms & Routing
 - [x] Multi-criteria edge weighting (Scalarization: cost vs. time vs. layovers)
 - [x] Dijkstra's Algorithm (Baseline control group)
+- [ ] Dijkstra with priority queue and Fenwick tree
 - [x] Two-Phase Router (Topology-First Geodesic Corridors + Schedule Sweep)
 - [ ] Two-Phase Router with hubs
 - [ ] Yen's Algorithm

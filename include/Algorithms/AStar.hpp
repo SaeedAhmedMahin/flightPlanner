@@ -1,4 +1,5 @@
 #pragma once
+#include "../DataStructures/Flat4AryMinHeap.hpp"
 #include "../DataStructures/airport.hpp"
 #include "../DataStructures/flight.hpp"
 #include "Dijkstra.hpp"
@@ -31,14 +32,14 @@ struct AStarState {
 };
 static_assert(sizeof(AStarState) == 16, "AStarState must be 16 bytes");
 
-// Min-heap comparator for A*: lowest f_score explored first.
+// Min-heap comparator for A*: returns true if 'a' has higher priority than 'b' (lower f_score).
 // On tie, breaks in favor of higher g_score (closer to destination).
 struct CompareAStar {
   bool operator()(const AStarState &a, const AStarState &b) const {
     if (a.f_score != b.f_score) {
-      return a.f_score > b.f_score; // Min-heap on f_score
+      return a.f_score < b.f_score;
     }
-    return a.g_score < b.g_score;   // Tie-breaker: prefer higher g_score (smaller h)
+    return a.g_score > b.g_score; // Tie-breaker: prefer higher g_score (smaller h)
   }
 };
 
@@ -96,7 +97,7 @@ public:
     std::vector<Label> all_labels;
     all_labels.reserve(65536);
 
-    std::priority_queue<AStarState, std::vector<AStarState>, CompareAStar> pq;
+    Flat4AryMinHeap<AStarState, CompareAStar> pq(65536);
 
     // Initial heuristic from source to dest
     double h_start = compute_h(source_id, dest_id, nodes, mode);

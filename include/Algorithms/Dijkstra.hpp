@@ -1,4 +1,5 @@
 #pragma once
+#include "../DataStructures/Flat4AryMinHeap.hpp"
 #include "../DataStructures/airport.hpp"
 #include "../DataStructures/flight.hpp"
 #include "SearchState.hpp"
@@ -60,9 +61,8 @@ public:
     all_labels.reserve(65536); // Pre-allocate to avoid frequent re-allocations
 
     // SearchState carries (current_time, label_id, total_cost, node_id).
-    // CompareCost orders the min-heap by total_cost (defined in
-    // SearchState.hpp)
-    std::priority_queue<SearchState, std::vector<SearchState>, CompareCost> pq;
+    // Flat4AryMinHeap orders the cache-aligned 4-ary min-heap by total_cost
+    Flat4AryMinHeap<SearchState, CompareCost> pq(65536);
 
     // Seed: source airport with zero cost and the user-supplied query time.
     // label_id = -1 signals the chain root (no parent edge).
