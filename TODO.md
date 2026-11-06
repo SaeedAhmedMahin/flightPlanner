@@ -31,7 +31,6 @@
 - [ ] Contraction Hierarchies (Live query)
 - [ ] ALT Preprocessing (Landmark selection & triangle inequality)
 
-- [ ] Two Phase Router with hubs
 
 ## 4. Terminal User Interface (FTXUI)
 - [ ] CMake setup linking FTXUI
