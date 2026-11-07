@@ -11,8 +11,8 @@
 - [x] Synthetic multi-variable weights (Cost, Duration, Time Zones)
 - [x] C++ CSV Parser (Read `airports_clean.csv` & `routes_clean.csv`)
 - [x] Generate 1 Million+ flights
-- [ ] Metadata Registry (Hash maps for IATA -> ID, String pooling)
-- [ ] Graph Builder (Construct the contiguous Adjacency List)
+- [x] Metadata Registry (Hash maps for IATA -> ID, String pooling)
+- [x] Graph Builder (Construct the contiguous Adjacency List)
 
 ## 3. Algorithms & Routing
 - [x] Multi-criteria edge weighting (Scalarization: cost vs. time vs. layovers)
