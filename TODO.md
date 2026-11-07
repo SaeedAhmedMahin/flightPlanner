@@ -43,5 +43,10 @@
 ## 5. Research & Benchmarking
 - [ ] C++ Profiler (Track microsecond CPU time & nodes expanded)
 - [ ] Headless Benchmark Mode (Run 10,000 random query pairs)
+- [ ] Compare accuracy of algorithms:
+    - [ ] heuristic accuracy
+    - [ ] optimality gaps
+    - [ ] runtime
+    - [ ] if the cheapest path is actually truly the cheapest or equal to the cheapest paths among all algos and also for shortest paths do the same
 - [ ] Python Analysis Script (`plot_benchmarks.py` using Seaborn/Matplotlib)
 - [ ] Write 8–12 page mini-paper in LaTeX (`main.tex`)
