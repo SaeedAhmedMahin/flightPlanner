@@ -22,7 +22,7 @@
 - [ ] Two-Phase Router with hubs
 - [ ] Yen's Algorithm
 - [x] A* Search (Haversine heuristic)
-- [ ] Label-Correcting Algorithm (SPPRC Bellman-Ford variant)
+- [x] Label-Correcting Algorithm (SPPRC Bellman-Ford variant)
 - [ ] The Pulse Algorithm (DFS with bounding and rollback)
 - [ ] Resource-Constrained A* (RC-A* with heuristic look-ahead)
 - [ ] Lagrangian Relaxation (Dynamic penalty multipliers)

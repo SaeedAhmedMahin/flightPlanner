@@ -1013,6 +1013,7 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: /Users/saeedahmedmahin/code/flightP
   /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/17/include/stdarg.h \
   /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/17/include/stddef.h \
   /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/17/include/stdint.h \
+  /Users/saeedahmedmahin/code/flightPlanner/include/DataStructures/Flat4AryMinHeap.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/DataStructures/airport.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/DataStructures/flight.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/AStar.hpp \
@@ -1257,6 +1258,8 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: /Users/saeedahmedmahin/code/flightP
 /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/sstream:
 
 /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/ratio:
+
+/Users/saeedahmedmahin/code/flightPlanner/include/DataStructures/Flat4AryMinHeap.hpp:
 
 /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/queue:
 
