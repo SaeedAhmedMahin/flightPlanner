@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <queue>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -32,14 +31,23 @@ struct AStarState {
 };
 static_assert(sizeof(AStarState) == 16, "AStarState must be 16 bytes");
 
-// Min-heap comparator for A*: returns true if 'a' has higher priority than 'b' (lower f_score).
-// On tie, breaks in favor of higher g_score (closer to destination).
+// Min-heap comparator for A*: returns true if 'a' has higher priority than 'b'.
+// Primary: lower f_score.
+// Secondary: lower number of flight hops (fewer transits).
+// Tertiary: higher g_score (closer to destination).
 struct CompareAStar {
   bool operator()(const AStarState &a, const AStarState &b) const {
     if (a.f_score != b.f_score) {
       return a.f_score < b.f_score;
     }
-    return a.g_score > b.g_score; // Tie-breaker: prefer higher g_score (smaller h)
+    if (a.hops != b.hops) {
+      return a.hops < b.hops;
+    }
+    if (a.hops != b.hops) {
+      return a.hops < b.hops;
+    }
+    return a.g_score >
+           b.g_score; // Tie-breaker: prefer higher g_score (smaller h)
   }
 };
 
@@ -54,7 +62,8 @@ class AStar {
 public:
   const uint32_t INF = std::numeric_limits<uint32_t>::max();
 
-  static inline double haversine_km(float lat1, float lon1, float lat2, float lon2) {
+  static inline double haversine_km(float lat1, float lon1, float lat2,
+                                    float lon2) {
     const double R = 6371.0;
     double dLat = (lat2 - lat1) * M_PI / 180.0;
     double dLon = (lon2 - lon1) * M_PI / 180.0;
@@ -65,13 +74,16 @@ public:
     return R * c;
   }
 
-  // Admissible heuristic: strictly lower-bounds remaining cost/time to destination
+  // Admissible heuristic: strictly lower-bounds remaining cost/time to
+  // destination
   static inline double compute_h(uint32_t node_id, uint32_t dest_id,
                                  const std::vector<airport> &nodes,
                                  OptimizeFor mode) {
-    if (node_id == dest_id) return 0.0;
-    double dist = haversine_km(nodes[node_id].latitude, nodes[node_id].longitude,
-                               nodes[dest_id].latitude, nodes[dest_id].longitude);
+    if (node_id == dest_id)
+      return 0.0;
+    double dist =
+        haversine_km(nodes[node_id].latitude, nodes[node_id].longitude,
+                     nodes[dest_id].latitude, nodes[dest_id].longitude);
     if (mode == OptimizeFor::PRICE) {
       // Conservative lower bound heuristic for flight fare: $0.025 / km
       return dist * 0.025;
@@ -101,19 +113,15 @@ public:
 
     // Initial heuristic from source to dest
     double h_start = compute_h(source_id, dest_id, nodes, mode);
-    uint16_t f_start = static_cast<uint16_t>(std::min<double>(h_start, 65535.0));
+    uint16_t f_start =
+        static_cast<uint16_t>(std::min<double>(h_start, 65535.0));
 
     int32_t source_label_id = static_cast<int32_t>(all_labels.size());
     all_labels.push_back(Label{source_id, 0, start_time, -1, flight{}, 0});
     pareto_labels[source_id].push_back({0, start_time, 0});
 
-    pq.push({start_time,
-             source_label_id,
-             f_start,
-             0,
-             static_cast<uint16_t>(source_id),
-             0,
-             0});
+    pq.push({start_time, source_label_id, f_start, 0,
+             static_cast<uint16_t>(source_id), 0, 0});
 
     while (!pq.empty()) {
       AStarState current = pq.top();
@@ -122,7 +130,8 @@ public:
 
       // Early exit: first time we pop destination is guaranteed optimal
       if (current.node_id == dest_id) {
-        return reconstruct_path(current, all_labels, nodes, start_time, metrics);
+        return reconstruct_path(current, all_labels, nodes, start_time,
+                                metrics);
       }
 
       // Stale-state check
@@ -195,16 +204,11 @@ public:
         // Compute A* f_score = g(n) + h(n)
         double h_next = compute_h(next_node, dest_id, nodes, mode);
         double f_val = static_cast<double>(new_g) + h_next;
-        uint16_t next_f = static_cast<uint16_t>(
-            std::min<double>(f_val, static_cast<double>(std::numeric_limits<uint16_t>::max())));
+        uint16_t next_f = static_cast<uint16_t>(std::min<double>(
+            f_val, static_cast<double>(std::numeric_limits<uint16_t>::max())));
 
-        pq.push({next_time,
-                 new_label_id,
-                 next_f,
-                 static_cast<uint16_t>(new_g),
-                 static_cast<uint16_t>(next_node),
-                 next_hops,
-                 0});
+        pq.push({next_time, new_label_id, next_f, static_cast<uint16_t>(new_g),
+                 static_cast<uint16_t>(next_node), next_hops, 0});
       }
     }
 
@@ -276,4 +280,3 @@ private:
     return result;
   }
 };
-

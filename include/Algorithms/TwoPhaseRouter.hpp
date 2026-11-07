@@ -364,6 +364,14 @@ private:
         best_result.total_price = final_state.total_price;
         best_result.total_time_mins = journey_time;
         best_result.path = final_state.flights_taken;
+      } else if (best_result.success && final_state.total_price == best_result.total_price) {
+        // If two routes have the exact same price, prefer the one with fewer transits (fewer flight legs)
+        if (final_state.flights_taken.size() < best_result.path.size() ||
+            (final_state.flights_taken.size() == best_result.path.size() &&
+             journey_time < best_result.total_time_mins)) {
+          best_result.total_time_mins = journey_time;
+          best_result.path = final_state.flights_taken;
+        }
       }
     }
   }

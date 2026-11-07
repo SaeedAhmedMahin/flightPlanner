@@ -27,10 +27,15 @@ struct SearchState {
 };
 static_assert(sizeof(SearchState) == 16, "SearchState must be 16 bytes");
 
-// Min-heap comparator: returns true if 'a' has higher priority than 'b' (lower total_cost)
+// Min-heap comparator: returns true if 'a' has higher priority than 'b'.
+// Primary: lower total_cost.
+// Secondary tie-breaker: lower number of flight hops (fewer transits).
 struct CompareCost {
   bool operator()(const SearchState &a, const SearchState &b) const {
-    return a.total_cost < b.total_cost;
+    if (a.total_cost != b.total_cost) {
+      return a.total_cost < b.total_cost;
+    }
+    return a.hops < b.hops;
   }
 };
 

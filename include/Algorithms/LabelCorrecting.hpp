@@ -174,12 +174,16 @@ public:
       }
       if (mode == OptimizeFor::PRICE) {
         if (lbl.cost < best_lbl->cost ||
-            (lbl.cost == best_lbl->cost && lbl.arrival_time < best_lbl->arrival_time)) {
+            (lbl.cost == best_lbl->cost && lbl.hops < best_lbl->hops) ||
+            (lbl.cost == best_lbl->cost && lbl.hops == best_lbl->hops &&
+             lbl.arrival_time < best_lbl->arrival_time)) {
           best_lbl = &lbl;
         }
       } else {
         if (lbl.arrival_time < best_lbl->arrival_time ||
-            (lbl.arrival_time == best_lbl->arrival_time && lbl.cost < best_lbl->cost)) {
+            (lbl.arrival_time == best_lbl->arrival_time && lbl.cost < best_lbl->cost) ||
+            (lbl.arrival_time == best_lbl->arrival_time && lbl.cost == best_lbl->cost &&
+             lbl.hops < best_lbl->hops)) {
           best_lbl = &lbl;
         }
       }

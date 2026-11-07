@@ -149,13 +149,19 @@ public:
       if (mode == OptimizeFor::PRICE) {
         if (all_labels[lid].cost < all_labels[best_label_id].cost ||
             (all_labels[lid].cost == all_labels[best_label_id].cost &&
+             all_labels[lid].hops < all_labels[best_label_id].hops) ||
+            (all_labels[lid].cost == all_labels[best_label_id].cost &&
+             all_labels[lid].hops == all_labels[best_label_id].hops &&
              all_labels[lid].arrival_time < all_labels[best_label_id].arrival_time)) {
           best_label_id = lid;
         }
       } else {
         if (all_labels[lid].arrival_time < all_labels[best_label_id].arrival_time ||
             (all_labels[lid].arrival_time == all_labels[best_label_id].arrival_time &&
-             all_labels[lid].cost < all_labels[best_label_id].cost)) {
+             all_labels[lid].cost < all_labels[best_label_id].cost) ||
+            (all_labels[lid].arrival_time == all_labels[best_label_id].arrival_time &&
+             all_labels[lid].cost == all_labels[best_label_id].cost &&
+             all_labels[lid].hops < all_labels[best_label_id].hops)) {
           best_label_id = lid;
         }
       }
