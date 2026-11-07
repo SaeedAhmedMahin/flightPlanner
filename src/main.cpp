@@ -1,5 +1,6 @@
 #include "Algorithms/Dijkstra.hpp"
 #include "Algorithms/AStar.hpp"
+#include "Algorithms/BFS.hpp"
 #include "Algorithms/TwoPhaseRouter.hpp"
 #include "Algorithms/LabelCorrecting.hpp"
 #include "DataLoader.hpp"
@@ -190,7 +191,28 @@ int main() {
     benchmarks.push_back({"Label-Corr", "fastest", duration.count(), res});
   }
 
-  // 4. Two-Phase Router (Topology-First, Schedule-Second)
+  // 4. Breadth-First Search (Fewest Hops Baseline)
+  BFSRouter bfs_router;
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = bfs_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        OptimizeFor::PRICE, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"BFS (Hops)", "cheapest", duration.count(), res});
+  }
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = bfs_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        OptimizeFor::TIME, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"BFS (Hops)", "fastest", duration.count(), res});
+  }
+
+  // 5. Two-Phase Router (Topology-First, Schedule-Second)
   TwoPhaseRouter two_phase_router;
   {
     auto start = std::chrono::high_resolution_clock::now();
