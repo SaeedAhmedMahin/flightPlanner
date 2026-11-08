@@ -13,7 +13,7 @@
 - [x] Generate 1 Million+ flights
 - [x] Metadata Registry (Hash maps for IATA -> ID, String pooling)
 - [x] Graph Builder (Construct the contiguous Adjacency List)
-- [ ] A best path which could be a shorter journey than the cheapest one but not the shortest and be around 10-15% more expensive than the cheapest journey.
+- [x] A best path which could be a shorter journey than the cheapest one but not the shortest and be around 10-15% more expensive than the cheapest journey.
 
 ## 3. Algorithms & Routing
 - [x] Multi-criteria edge weighting (Scalarization: cost vs. time vs. layovers)
@@ -21,7 +21,7 @@
 - [ ] Dijkstra with priority queue and Fenwick tree
 - [x] Two-Phase Router (Topology-First Geodesic Corridors + Schedule Sweep)
 - [ ] Two-Phase Router with hubs
-- [ ] Yen's Algorithm
+- [x] Yen's Algorithm
 - [x] A* Search (Haversine heuristic)
 - [x] Label-Correcting Algorithm (SPPRC Bellman-Ford variant)
 - [ ] The Pulse Algorithm (DFS with bounding and rollback)

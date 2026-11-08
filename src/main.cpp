@@ -3,6 +3,7 @@
 #include "Algorithms/BFS.hpp"
 #include "Algorithms/TwoPhaseRouter.hpp"
 #include "Algorithms/LabelCorrecting.hpp"
+#include "Algorithms/Yen.hpp"
 #include "DataLoader.hpp"
 #include <chrono>
 #include <exception>
@@ -235,12 +236,64 @@ int main() {
     benchmarks.push_back({"Two-Phase", "fastest", duration.count(), res});
   }
 
+  // 6. Yen's Algorithm (K-Shortest Paths & Best Path Recommendation)
+  YenRouter yen_router;
+  YenRouter::YenKResult yen_k_cheapest;
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    yen_k_cheapest = yen_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        OptimizeFor::PRICE, absolute_start_time, 5);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    RoutingResult primary_yen = yen_k_cheapest.k_paths.empty()
+                                    ? RoutingResult{false, 0, 0, {}, {}}
+                                    : yen_k_cheapest.k_paths[0];
+    benchmarks.push_back({"Yen's K-SP", "k=5 cheap", duration.count(), primary_yen});
+  }
+
   // --- OUTPUT ALL PERFORMANCES FIRST ON TOP ---
   print_performance_summary(benchmarks);
 
   // --- OUTPUT DETAILED PATHS BELOW ---
   for (const auto &run : benchmarks) {
     print_route_path(run, loader, source_id);
+  }
+
+  // --- OUTPUT YEN'S TOP-K ALTERNATIVE PATHS & "BEST FLIGHT" RECOMMENDATION ---
+  if (!yen_k_cheapest.k_paths.empty()) {
+    std::cout << "\n======================================================\n";
+    std::cout << "        YEN'S TOP-" << yen_k_cheapest.k_paths.size()
+              << " ALTERNATIVE ITINERARIES (PRICE)        \n";
+    std::cout << "======================================================\n";
+    for (size_t i = 0; i < yen_k_cheapest.k_paths.size(); ++i) {
+      const auto &res = yen_k_cheapest.k_paths[i];
+      std::cout << "Alternative #" << (i + 1) << ": $" << res.total_price
+                << " | Duration: " << res.total_time_mins / 60 << "h "
+                << res.total_time_mins % 60 << "m | Transits: "
+                << (res.path.empty() ? 0 : res.path.size() - 1) << " | Route: ";
+      std::cout << loader.ui_nodes[source_id].iata_code;
+      for (size_t j = 0; j < res.path.size(); ++j) {
+        std::cout << " -> " << loader.ui_nodes[res.path[j].destination_id].iata_code;
+      }
+      std::cout << "\n";
+    }
+
+    std::cout << "\n======================================================\n";
+    std::cout << "       INTERNATIONALLY CREDITED BEST FLIGHT SELECTION \n";
+    std::cout << "======================================================\n";
+    const auto &best = yen_k_cheapest.best_recommendation;
+    std::cout << "Recommended Choice: $" << best.result.total_price
+              << " (" << best.result.total_time_mins / 60 << "h "
+              << best.result.total_time_mins % 60 << "m, "
+              << (best.result.path.empty() ? 0 : best.result.path.size() - 1)
+              << " transits)\n";
+    std::cout << "Reasoning: " << best.recommendation_reason << "\n";
+    std::cout << "Generalized Economic Cost: $" << std::fixed << std::setprecision(2)
+              << best.generalized_cost << " (Value of Time: $25.00/hr, Layover Penalty: $15/stop)\n";
+
+    RunStats best_run = {"Best-Choice", "recommended", 0, best.result};
+    print_route_path(best_run, loader, source_id);
   }
 
   return 0;
