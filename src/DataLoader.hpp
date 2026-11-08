@@ -55,9 +55,40 @@ public:
   // String Pools
   std::vector<std::string> country_pool;
   std::vector<std::string> airline_pool;
+  std::unordered_map<std::string, std::string> airline_names;
+
+  void parse_airlines(const std::string &filepath) {
+    std::string path = resolve_path(filepath);
+    std::ifstream file(path);
+    if (!file.is_open()) return;
+
+    std::string line;
+    while (std::getline(file, line)) {
+      if (line.empty()) continue;
+      auto cols = parse_csv_line(line);
+      // Cols: 0: Airline ID, 1: Name, 2: Alias, 3: IATA, 4: ICAO, 5: Callsign, 6: Country, 7: Active
+      if (cols.size() >= 4 && !cols[3].empty() && cols[3] != "-" && cols[3] != "\\N") {
+        std::string iata = cols[3];
+        std::string name = cols[1];
+        if (!name.empty() && name != "\\N") {
+          airline_names[iata] = name;
+        }
+      }
+    }
+  }
+
+  std::string get_airline_name(const std::string &iata_code) const {
+    auto it = airline_names.find(iata_code);
+    if (it != airline_names.end()) {
+      return it->second;
+    }
+    return iata_code;
+  }
 
   void load_data(const std::string &airports_csv,
-                 const std::string &routes_csv) {
+                 const std::string &routes_csv,
+                 const std::string &airlines_csv = "data/raw/airlines.dat") {
+    parse_airlines(airlines_csv);
     parse_airports(airports_csv);
 
     // Resize adjacency lists to exactly match the number of airports (V)
