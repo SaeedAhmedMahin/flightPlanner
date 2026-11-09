@@ -144,8 +144,8 @@ private:
     root.path[0] = source_id;
 
     if (mode == OptimizeFor::PRICE) {
-      // Conservative lower bound heuristic for flight fare: $0.025 / km
-      root.estimated_total = h_start * 0.025;
+      // Conservative lower bound heuristic for flight fare: $0.018 / km
+      root.estimated_total = h_start * 0.018;
       pq.push(root);
     } else {
       // Flight speed lower bound (~850 km/h -> ~14.1 km/min -> ~0.070 min/km)
@@ -217,7 +217,7 @@ private:
         if (mode == OptimizeFor::PRICE) {
           uint16_t min_edge_price = static_min_price[u][edge_idx];
           new_score_so_far = current.score_so_far + min_edge_price;
-          est_total = new_score_so_far + (h_v * 0.025);
+          est_total = new_score_so_far + (h_v * 0.018);
         } else {
           uint16_t min_edge_dur = static_min_duration[u][edge_idx];
           new_score_so_far = current.score_so_far + min_edge_dur;

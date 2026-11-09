@@ -85,8 +85,8 @@ public:
         haversine_km(nodes[node_id].latitude, nodes[node_id].longitude,
                      nodes[dest_id].latitude, nodes[dest_id].longitude);
     if (mode == OptimizeFor::PRICE) {
-      // Conservative lower bound heuristic for flight fare: $0.025 / km
-      return dist * 0.025;
+      // Conservative lower bound heuristic for flight fare: $0.018 / km (strictly admissible)
+      return dist * 0.018;
     } else {
       // Speed lower bound at 1000 km/h: ~0.060 min / km
       return dist * 0.060;
