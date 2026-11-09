@@ -4,6 +4,18 @@ A high-performance C++ research project designed to benchmark, analyze, and visu
 
 ---
 
+## 🚀 Quick Run
+
+```bash
+./run.sh
+# or pass arguments directly:
+./run.sh DAC JFK 2026-11-04
+```
+
+For detailed build instructions, prerequisites, troubleshooting, and sample routes, see **[HOW_TO_RUN.md](HOW_TO_RUN.md)** (or **[TO_RUN.md](TO_RUN.md)**).
+
+---
+
 ##  Research Objectives & Questions
 
 The primary objective of this project is to evaluate the performance of hierarchical, goal-directed, and bidirectional graph traversal techniques under different constraints (time, cost, layovers). 

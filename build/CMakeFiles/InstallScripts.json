@@ -1,7 +1,7 @@
 {
 	"InstallScripts" : 
 	[
-		"/Users/saeedahmedmahin/code/flightPlanner/build/cmake_install.cmake"
+		"/home/saeed/code/flightPlanner/build/cmake_install.cmake"
 	],
 	"Parallel" : false
 }

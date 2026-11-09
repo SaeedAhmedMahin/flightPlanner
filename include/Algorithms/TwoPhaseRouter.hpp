@@ -7,6 +7,7 @@
 #include <iostream>
 #include <limits>
 #include <queue>
+#include <unordered_map>
 #include <vector>
 
 // ---------------------------------------------------------------------------
