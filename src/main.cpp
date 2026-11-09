@@ -79,13 +79,14 @@ void print_route_path(const RunStats &run, const DataLoader &loader,
     std::string dest_iata = loader.ui_nodes[f.destination_id].iata_code;
     std::string airline_full_name = loader.get_airline_name(f_ui.airline_code);
 
-    // Compute flight duration
-    uint32_t dep_min = f.departure_time;
-    uint32_t arr_min = f.arrival_time;
-    uint32_t flight_dur_min =
-        (arr_min + (arr_min < dep_min ? 1440 : 0)) - dep_min;
+    // Flight duration from the precomputed wall-clock duration (timezone-aware)
+    uint32_t flight_dur_min = f.duration_mins;
     uint32_t dur_h = flight_dur_min / 60;
     uint32_t dur_m = flight_dur_min % 60;
+
+    // Local departure/arrival times for display (these are correctly in local time)
+    uint32_t dep_min = f.departure_time;
+    uint32_t arr_min = f.arrival_time;
 
     std::string dep_str =
         (dep_min / 60 < 10 ? "0" : "") + std::to_string(dep_min / 60) + ":" +
@@ -107,7 +108,8 @@ void print_route_path(const RunStats &run, const DataLoader &loader,
     // If there is a next flight in the itinerary, display the transit banner
     if (i + 1 < run.result.path.size()) {
       const flight &next_f = run.result.path[i + 1];
-      uint32_t arr_abs = f.flight_day * 1440 + f.arrival_time;
+      uint32_t arr_abs = f.flight_day * 1440 + f.arrival_time +
+                         (f.arrival_time < f.departure_time ? 1440 : 0);
       uint32_t next_dep_abs = next_f.flight_day * 1440 + next_f.departure_time;
       uint32_t transit_min =
           (next_dep_abs >= arr_abs) ? (next_dep_abs - arr_abs) : 0;

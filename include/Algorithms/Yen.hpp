@@ -134,7 +134,7 @@ public:
         if (!root_path.empty()) {
           const flight &last_f = root_path.back();
           uint32_t abs_dep = last_f.flight_day * 1440 + last_f.departure_time;
-          uint32_t dur = (last_f.arrival_time + (last_f.arrival_time < last_f.departure_time ? 1440 : 0)) - last_f.departure_time;
+          uint32_t dur = last_f.duration_mins;
           spur_time = abs_dep + dur;
           for (const flight &f : root_path) {
             spur_cost += f.price;
@@ -196,7 +196,7 @@ public:
             }
             const flight &last_f = candidate.path.back();
             uint32_t abs_dep = last_f.flight_day * 1440 + last_f.departure_time;
-            uint32_t dur = (last_f.arrival_time + (last_f.arrival_time < last_f.departure_time ? 1440 : 0)) - last_f.departure_time;
+            uint32_t dur = last_f.duration_mins;
             candidate.total_time_mins = (abs_dep + dur) - start_time;
             candidate.metrics = total_metrics;
 
@@ -388,7 +388,7 @@ private:
           continue; // Layover > 24h
         }
 
-        uint32_t dur = (edge.arrival_time + (edge.arrival_time < edge.departure_time ? 1440 : 0)) - edge.departure_time;
+        uint32_t dur = edge.duration_mins;
         uint32_t next_time = abs_dep + dur;
 
         uint32_t new_cost = 0;

@@ -336,6 +336,44 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: /home/saeed/code/flightPlanner/src/
   /usr/lib/gcc/x86_64-pc-linux-gnu/16/include/stddef.h \
   /usr/lib/gcc/x86_64-pc-linux-gnu/16/include/stdint.h
 
+flight_router: /usr/lib/Scrt1.o \
+  /usr/lib/crti.o \
+  /usr/lib/crtn.o \
+  /usr/lib/libc.so \
+  /usr/lib/libgcc_s.so.1 \
+  /usr/lib/libm.so \
+  /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtbeginS.o \
+  /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtendS.o \
+  /usr/lib/gcc/x86_64-pc-linux-gnu/16/libatomic.so \
+  /usr/lib/gcc/x86_64-pc-linux-gnu/16/libatomic_asneeded.so \
+  /usr/lib/gcc/x86_64-pc-linux-gnu/16/libgcc.a \
+  /usr/lib/gcc/x86_64-pc-linux-gnu/16/libgcc_s.so \
+  /usr/lib/gcc/x86_64-pc-linux-gnu/16/libstdc++.so \
+  /usr/lib/ld-linux-x86-64.so.2 \
+  /usr/lib/libc.so.6 \
+  /usr/lib/libc_nonshared.a \
+  /usr/lib/libm.so.6 \
+  /usr/lib/libmvec.so.1 \
+  CMakeFiles/flight_router.dir/src/main.cpp.o
+
+
+/usr/lib/libmvec.so.1:
+
+/usr/lib/libm.so.6:
+
+/usr/lib/libc_nonshared.a:
+
+/usr/lib/ld-linux-x86-64.so.2:
+
+/usr/lib/gcc/x86_64-pc-linux-gnu/16/libgcc.a:
+
+/usr/lib/libm.so:
+
+/usr/lib/libgcc_s.so.1:
+
+/usr/lib/crti.o:
+
+/usr/lib/Scrt1.o:
 
 /usr/lib/gcc/x86_64-pc-linux-gnu/16/include/stdint.h:
 
@@ -381,6 +419,8 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: /home/saeed/code/flightPlanner/src/
 
 /usr/include/c++/16/x86_64-pc-linux-gnu/bits/c++locale.h:
 
+/usr/lib/gcc/x86_64-pc-linux-gnu/16/libatomic_asneeded.so:
+
 /usr/include/linux/errno.h:
 
 /usr/include/c++/16/x86_64-pc-linux-gnu/bits/c++io.h:
@@ -395,13 +435,19 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: /home/saeed/code/flightPlanner/src/
 
 /usr/include/c++/16/type_traits:
 
+/usr/lib/libc.so.6:
+
 /usr/include/c++/16/tuple:
 
 /usr/include/c++/16/tr1/special_function_util.h:
 
 /usr/include/c++/16/tr1/poly_laguerre.tcc:
 
+/usr/lib/gcc/x86_64-pc-linux-gnu/16/libgcc_s.so:
+
 /usr/include/c++/16/tr1/modified_bessel_func.tcc:
+
+/usr/lib/crtn.o:
 
 /usr/include/c++/16/tr1/legendre_function.tcc:
 
@@ -539,6 +585,8 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: /home/saeed/code/flightPlanner/src/
 
 /usr/include/bits/types/__mbstate_t.h:
 
+/usr/lib/gcc/x86_64-pc-linux-gnu/16/crtendS.o:
+
 /usr/include/bits/stdio_lim.h:
 
 /usr/include/bits/types/__locale_t.h:
@@ -550,6 +598,8 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: /home/saeed/code/flightPlanner/src/
 /usr/include/linux/posix_types.h:
 
 /usr/include/bits/types/FILE.h:
+
+/usr/lib/gcc/x86_64-pc-linux-gnu/16/libstdc++.so:
 
 /usr/include/c++/16/bits/unordered_set.h:
 
@@ -597,6 +647,8 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: /home/saeed/code/flightPlanner/src/
 
 /usr/include/c++/16/bits/cxxabi_init_exception.h:
 
+/usr/lib/gcc/x86_64-pc-linux-gnu/16/libatomic.so:
+
 /usr/include/bits/mathcalls-macros.h:
 
 /usr/include/asm-generic/int-ll64.h:
@@ -628,6 +680,8 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: /home/saeed/code/flightPlanner/src/
 /usr/include/c++/16/bits/ostream_insert.h:
 
 /home/saeed/code/flightPlanner/include/Algorithms/LabelCorrecting.hpp:
+
+CMakeFiles/flight_router.dir/src/main.cpp.o:
 
 /usr/include/bits/time.h:
 
@@ -705,11 +759,15 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: /home/saeed/code/flightPlanner/src/
 
 /usr/include/c++/16/bits/localefwd.h:
 
+/usr/lib/gcc/x86_64-pc-linux-gnu/16/crtbeginS.o:
+
 /usr/include/c++/16/bits/ostream.tcc:
 
 /usr/include/c++/16/bits/stl_relops.h:
 
 /usr/include/bits/pthread_stack_min-dynamic.h:
+
+/usr/lib/libc.so:
 
 /usr/include/bits/pthreadtypes.h:
 

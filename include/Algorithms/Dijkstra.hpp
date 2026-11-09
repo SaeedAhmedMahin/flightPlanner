@@ -135,12 +135,8 @@ public:
         }
 
         // Compute absolute minute we touch down at next_node.
-        // arrival_time is local time so add 1440 if the flight crosses
-        // midnight.
-        uint32_t flight_duration =
-            (edge.arrival_time +
-             (edge.arrival_time < edge.departure_time ? 1440 : 0)) -
-            edge.departure_time;
+        // Use the true wall-clock flight duration (timezone-aware)
+        uint32_t flight_duration = edge.duration_mins;
         uint32_t next_time = absolute_flight_departure + flight_duration;
 
         // Determine the optimization metric

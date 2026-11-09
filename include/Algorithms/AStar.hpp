@@ -168,10 +168,7 @@ public:
           continue; // Transit wait > 24 hours
         }
 
-        uint32_t flight_duration =
-            (edge.arrival_time +
-             (edge.arrival_time < edge.departure_time ? 1440 : 0)) -
-            edge.departure_time;
+        uint32_t flight_duration = edge.duration_mins;
         uint32_t next_time = absolute_flight_departure + flight_duration;
 
         uint32_t new_g = 0;

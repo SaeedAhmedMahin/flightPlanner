@@ -101,10 +101,7 @@ public:
           continue; // Layover > 24 hours
         }
 
-        uint32_t duration =
-            (edge.arrival_time +
-             (edge.arrival_time < edge.departure_time ? 1440 : 0)) -
-            edge.departure_time;
+        uint32_t duration = edge.duration_mins;
         uint32_t next_time = abs_dep + duration;
 
         uint32_t new_cost = 0;

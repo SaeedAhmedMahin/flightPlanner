@@ -290,9 +290,7 @@ private:
           if (wait_time > 1440)
             continue; // Layover over 24h
 
-          uint32_t duration = (f.arrival_time +
-                               (f.arrival_time < f.departure_time ? 1440 : 0)) -
-                              f.departure_time;
+          uint32_t duration = f.duration_mins;
           uint32_t next_time = abs_dep + duration;
           uint32_t next_price = state.total_price + f.price;
 

@@ -108,7 +108,7 @@ public:
       std::unordered_map<uint32_t, EdgeStats> dest_stats;
 
       for (const auto &f : adjacency_list[u]) {
-        uint16_t dur = (f.arrival_time + (f.arrival_time < f.departure_time ? 1440 : 0)) - f.departure_time;
+        uint16_t dur = f.duration_mins;
         auto it = dest_stats.find(f.destination_id);
         if (it == dest_stats.end()) {
           dest_stats[f.destination_id] = {f.price, dur};
@@ -268,6 +268,7 @@ private:
       f.flight_details_id = current_flight_id++;
       f.airline_id = get_airline_idx(cols[2]);
       f.price = static_cast<uint16_t>(std::stoul(cols[4]));
+      f.duration_mins = static_cast<uint16_t>(std::stoul(cols[6]));
       f.departure_time = static_cast<uint16_t>(std::stoul(cols[7]));
       f.arrival_time = static_cast<uint16_t>(std::stoul(cols[8]));
       f.flight_day = parse_date_to_days(cols[5]);
