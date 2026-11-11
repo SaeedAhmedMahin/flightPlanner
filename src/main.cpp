@@ -122,11 +122,14 @@ void print_route_path(const RunStats &run, const DataLoader &loader,
       uint32_t lay_h = transit_min / 60;
       uint32_t lay_m = transit_min % 60;
 
-      std::cout << "\n(" << lay_h << " hour";
-      if (lay_h != 1)
-        std::cout << "s";
-      if (lay_m > 0)
-        std::cout << " " << lay_m << " mins";
+      std::cout << "\n(";
+      if (lay_h > 0) {
+        std::cout << lay_h << " hour" << (lay_h != 1 ? "s" : "");
+        if (lay_m > 0) std::cout << " ";
+      }
+      if (lay_m > 0 || lay_h == 0) {
+        std::cout << lay_m << " mins";
+      }
       std::cout << " TRANSIT @ " << dest_iata << ")\n\n";
     }
 

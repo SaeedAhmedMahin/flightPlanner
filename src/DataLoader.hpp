@@ -138,6 +138,22 @@ public:
       static_route_graph[u] = std::move(neighbors);
       static_route_min_price[u] = std::move(min_prices);
       static_route_min_duration[u] = std::move(min_durations);
+
+      // Dynamically calibrate Minimum Connecting Time (MCT):
+      // - Global minimum floor: 45 minutes for standard / regional airports.
+      // - Major international hubs (degree >= 40, e.g. DEL, DOH, BKK): 60 minutes.
+      // - Mega-hubs (degree >= 110, e.g. DXB, LHR, JFK, CDG, FRA): 90 minutes.
+      // - Extreme mega-hubs (degree >= 180, e.g. DXB, FRA, CDG): 90-120 minutes.
+      size_t deg = static_route_graph[u].size();
+      if (deg >= 180) {
+        nodes[u].min_transfer = 105; // 105 mins for extreme mega-hubs (DXB, FRA, CDG)
+      } else if (deg >= 110) {
+        nodes[u].min_transfer = 90;  // 90 mins for mega-hubs (LHR, JFK, AMS, ATL, ORD)
+      } else if (deg >= 40) {
+        nodes[u].min_transfer = 60;  // 60 mins for major hubs (DEL, DOH, BKK, SIN)
+      } else {
+        nodes[u].min_transfer = 45;  // 45 mins global minimum floor
+      }
     }
   }
 
