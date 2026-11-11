@@ -3,6 +3,7 @@
 #include "Algorithms/Dijkstra.hpp"
 #include "Algorithms/LabelCorrecting.hpp"
 #include "Algorithms/TwoPhaseRouter.hpp"
+#include "Algorithms/TwoPhaseHubRouter.hpp"
 #include "Algorithms/Yen.hpp"
 #include "DataLoader.hpp"
 #include <chrono>
@@ -108,11 +109,16 @@ void print_route_path(const RunStats &run, const DataLoader &loader,
     // If there is a next flight in the itinerary, display the transit banner
     if (i + 1 < run.result.path.size()) {
       const flight &next_f = run.result.path[i + 1];
-      uint32_t arr_abs = f.flight_day * 1440 + f.arrival_time +
-                         (f.arrival_time < f.departure_time ? 1440 : 0);
-      uint32_t next_dep_abs = next_f.flight_day * 1440 + next_f.departure_time;
-      uint32_t transit_min =
-          (next_dep_abs >= arr_abs) ? (next_dep_abs - arr_abs) : 0;
+      int32_t origin_utc_offset = loader.nodes[current_airport_id].utc_offset_15m * 15;
+      uint32_t dep_utc = static_cast<uint32_t>(
+          static_cast<int32_t>(f.flight_day * 1440 + f.departure_time) - origin_utc_offset);
+      uint32_t arr_utc = dep_utc + f.duration_mins;
+
+      int32_t dest_utc_offset = loader.nodes[f.destination_id].utc_offset_15m * 15;
+      uint32_t next_dep_utc = static_cast<uint32_t>(
+          static_cast<int32_t>(next_f.flight_day * 1440 + next_f.departure_time) - dest_utc_offset);
+
+      uint32_t transit_min = (next_dep_utc >= arr_utc) ? (next_dep_utc - arr_utc) : 0;
       uint32_t lay_h = transit_min / 60;
       uint32_t lay_m = transit_min % 60;
 
@@ -159,7 +165,9 @@ int main() {
             << target_date << "\n";
 
   uint32_t start_day = DataLoader::parse_date_to_days(target_date);
-  uint32_t absolute_start_time = start_day * 1440; // 00:00 (Midnight)
+  int32_t source_utc_offset = loader.nodes[source_id].utc_offset_15m * 15;
+  uint32_t absolute_start_time = static_cast<uint32_t>(
+      static_cast<int32_t>(start_day * 1440) - source_utc_offset); // 00:00 local in UTC minutes
 
   std::vector<RunStats> benchmarks;
 
@@ -270,7 +278,30 @@ int main() {
     benchmarks.push_back({"Two-Phase", "fastest", duration.count(), res});
   }
 
-  // 6. Yen's Algorithm (K-Shortest Paths & Best Path Recommendation)
+  // 6. Two-Phase Hub Router (Hierarchical Hub-and-Spoke Aviation Corridors)
+  TwoPhaseHubRouter two_phase_hub_router;
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = two_phase_hub_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
+        loader.static_route_min_price, loader.static_route_min_duration,
+        loader.nodes, OptimizeFor::PRICE, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"Two-Phase Hub", "cheapest", duration.count(), res});
+  }
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = two_phase_hub_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
+        loader.static_route_min_price, loader.static_route_min_duration,
+        loader.nodes, OptimizeFor::TIME, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"Two-Phase Hub", "fastest", duration.count(), res});
+  }
+
+  // 7. Yen's Algorithm (K-Shortest Paths & Best Path Recommendation)
   YenRouter yen_router;
   YenRouter::YenKResult yen_k_cheapest;
   {

@@ -111,7 +111,7 @@ public:
         metrics.edges_relaxed++;
         uint32_t next_node = edge.destination_id;
 
-        // Minimum time we must depart from this airport: passenger needs time
+        // Minimum time we must depart from this airport in UTC: passenger needs time
         // to clear the gate or security for a transfer. Source has no transfer
         // time (we are already at the departure terminal at query time).
         uint32_t required_departure =
@@ -122,8 +122,11 @@ public:
           required_departure = current.current_time;
         }
 
-        uint32_t absolute_flight_departure =
-            edge.flight_day * 1440 + edge.departure_time;
+        // Flight departure in unified UTC minutes
+        int32_t origin_utc_offset = nodes[current.node_id].utc_offset_15m * 15;
+        uint32_t absolute_flight_departure = static_cast<uint32_t>(
+            static_cast<int32_t>(edge.flight_day * 1440 + edge.departure_time) -
+            origin_utc_offset);
 
         if (absolute_flight_departure < required_departure) {
           continue; // Missed the flight (or it departed in the past)
@@ -134,7 +137,7 @@ public:
           continue; // Transit wait is over 24 hours, skip
         }
 
-        // Compute absolute minute we touch down at next_node.
+        // Compute absolute UTC minute we touch down at next_node.
         // Use the true wall-clock flight duration (timezone-aware)
         uint32_t flight_duration = edge.duration_mins;
         uint32_t next_time = absolute_flight_departure + flight_duration;

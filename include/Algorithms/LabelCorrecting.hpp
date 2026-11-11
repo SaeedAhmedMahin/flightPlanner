@@ -104,7 +104,12 @@ public:
             req_dep = cur.arrival_time; // First departure has no layover penalty
           }
 
-          uint32_t abs_dep = edge.flight_day * 1440 + edge.departure_time;
+          // Flight departure in unified UTC minutes
+          int32_t origin_utc_offset = nodes[u].utc_offset_15m * 15;
+          uint32_t abs_dep = static_cast<uint32_t>(
+              static_cast<int32_t>(edge.flight_day * 1440 + edge.departure_time) -
+              origin_utc_offset);
+
           if (abs_dep < req_dep) {
             continue; // Missed flight
           }

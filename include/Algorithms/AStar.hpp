@@ -156,8 +156,11 @@ public:
           required_departure = current.current_time;
         }
 
-        uint32_t absolute_flight_departure =
-            edge.flight_day * 1440 + edge.departure_time;
+        // Flight departure in unified UTC minutes
+        int32_t origin_utc_offset = nodes[current.node_id].utc_offset_15m * 15;
+        uint32_t absolute_flight_departure = static_cast<uint32_t>(
+            static_cast<int32_t>(edge.flight_day * 1440 + edge.departure_time) -
+            origin_utc_offset);
 
         if (absolute_flight_departure < required_departure) {
           continue;

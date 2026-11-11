@@ -128,12 +128,16 @@ public:
         // Root path is from 0 to i (flights 0 to i-1)
         std::vector<flight> root_path(prev_path.path.begin(), prev_path.path.begin() + i);
 
-        // Calculate time and cost at the spur node
+        // Calculate time and cost at the spur node in UTC
         uint32_t spur_time = start_time;
         uint32_t spur_cost = 0;
         if (!root_path.empty()) {
           const flight &last_f = root_path.back();
-          uint32_t abs_dep = last_f.flight_day * 1440 + last_f.departure_time;
+          uint32_t last_origin = (root_path.size() == 1) ? source_id : root_path[root_path.size() - 2].destination_id;
+          int32_t origin_utc_offset = nodes[last_origin].utc_offset_15m * 15;
+          uint32_t abs_dep = static_cast<uint32_t>(
+              static_cast<int32_t>(last_f.flight_day * 1440 + last_f.departure_time) -
+              origin_utc_offset);
           uint32_t dur = last_f.duration_mins;
           spur_time = abs_dep + dur;
           for (const flight &f : root_path) {
@@ -195,7 +199,11 @@ public:
               candidate.total_price += f.price;
             }
             const flight &last_f = candidate.path.back();
-            uint32_t abs_dep = last_f.flight_day * 1440 + last_f.departure_time;
+            uint32_t last_origin = (candidate.path.size() == 1) ? source_id : candidate.path[candidate.path.size() - 2].destination_id;
+            int32_t origin_utc_offset = nodes[last_origin].utc_offset_15m * 15;
+            uint32_t abs_dep = static_cast<uint32_t>(
+                static_cast<int32_t>(last_f.flight_day * 1440 + last_f.departure_time) -
+                origin_utc_offset);
             uint32_t dur = last_f.duration_mins;
             candidate.total_time_mins = (abs_dep + dur) - start_time;
             candidate.metrics = total_metrics;
@@ -378,7 +386,12 @@ private:
           req_dep = current.current_time;
         }
 
-        uint32_t abs_dep = edge.flight_day * 1440 + edge.departure_time;
+        // Flight departure in unified UTC minutes
+        int32_t origin_utc_offset = nodes[current.node_id].utc_offset_15m * 15;
+        uint32_t abs_dep = static_cast<uint32_t>(
+            static_cast<int32_t>(edge.flight_day * 1440 + edge.departure_time) -
+            origin_utc_offset);
+
         if (abs_dep < req_dep) {
           continue;
         }

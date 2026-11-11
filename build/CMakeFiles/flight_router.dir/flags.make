@@ -4,7 +4,9 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/home/saeed/code/flightPlanner/include
+CXX_INCLUDES = -I/Users/saeedahmedmahin/code/flightPlanner/include
 
-CXX_FLAGS = -std=gnu++20
+CXX_FLAGSarm64 = -std=gnu++20 -arch arm64
+
+CXX_FLAGS = -std=gnu++20 -arch arm64
 

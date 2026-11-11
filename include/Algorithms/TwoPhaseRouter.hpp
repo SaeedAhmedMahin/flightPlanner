@@ -282,7 +282,11 @@ private:
             continue;
           metrics.edges_relaxed++;
 
-          uint32_t abs_dep = f.flight_day * 1440 + f.departure_time;
+          int32_t origin_utc_offset = nodes[u].utc_offset_15m * 15;
+          uint32_t abs_dep = static_cast<uint32_t>(
+              static_cast<int32_t>(f.flight_day * 1440 + f.departure_time) -
+              origin_utc_offset);
+
           if (abs_dep < req_dep)
             continue;
 

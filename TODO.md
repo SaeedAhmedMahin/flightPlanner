@@ -20,7 +20,7 @@
 - [x] Dijkstra's Algorithm (Baseline control group)
 - [ ] Dijkstra with priority queue and Fenwick tree
 - [x] Two-Phase Router (Topology-First Geodesic Corridors + Schedule Sweep)
-- [ ] Two-Phase Router with hubs
+- [x] Two-Phase Router with hubs
 - [x] Yen's Algorithm
 - [x] A* Search (Haversine heuristic)
 - [x] Label-Correcting Algorithm (SPPRC Bellman-Ford variant)

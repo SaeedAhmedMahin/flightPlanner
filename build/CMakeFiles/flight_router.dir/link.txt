@@ -1,1 +1,1 @@
-/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/flight_router.dir/link.d CMakeFiles/flight_router.dir/src/main.cpp.o -o flight_router
+/usr/bin/c++  -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/flight_router.dir/src/main.cpp.o -o flight_router
