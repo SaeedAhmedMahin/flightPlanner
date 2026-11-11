@@ -219,6 +219,7 @@ public:
     // =========================================================================
     // HIGH-PERFORMANCE MULTI-CORRIDOR BIDIRECTIONAL UPWARD CH QUERY
     // =========================================================================
+    // Multi-corridor bidirectional search state
     uint32_t n = static_cast<uint32_t>(nodes.size());
 
     struct UpEdge {
@@ -235,7 +236,7 @@ public:
     std::priority_queue<CHPQItem, std::vector<CHPQItem>, std::greater<CHPQItem>> f_pq;
     std::priority_queue<CHPQItem, std::vector<CHPQItem>, std::greater<CHPQItem>> b_pq;
 
-    const uint32_t SLACK = (mode == OptimizeFor::PRICE) ? 120 : 240;
+    const uint32_t SLACK = (mode == OptimizeFor::PRICE) ? 120 : 360;
 
     f_best[source_id] = 0;
     f_pq.push({0, source_id});
@@ -245,6 +246,46 @@ public:
 
     std::vector<uint32_t> f_visited;
     std::vector<uint32_t> b_visited;
+    std::vector<bool> f_seen(n, false);
+    std::vector<bool> b_seen(n, false);
+    f_seen[source_id] = true;
+    b_seen[dest_id] = true;
+
+    // 1-hop static outgoing neighbor seeding from source_id
+    // Crucial for top-ranked mega-hubs (e.g. CDG, FRA) that have few or no upward edges in forward_up
+    for (size_t i = 0; i < static_graph[source_id].size(); ++i) {
+      uint32_t nbr = static_graph[source_id][i];
+      uint32_t weight = (mode == OptimizeFor::PRICE) ? static_min_price[source_id][i]
+                                                     : static_min_duration[source_id][i];
+      if (weight < f_best[nbr]) {
+        if (!f_seen[nbr]) {
+          f_seen[nbr] = true;
+          f_visited.push_back(nbr);
+        }
+        f_best[nbr] = weight;
+        f_pq.push({weight, nbr});
+        f_edges[nbr].push_back({source_id, -1, weight});
+      }
+    }
+
+    // 1-hop static incoming neighbor seeding to dest_id
+    for (size_t u = 0; u < n; ++u) {
+      for (size_t i = 0; i < static_graph[u].size(); ++i) {
+        if (static_graph[u][i] == dest_id) {
+          uint32_t weight = (mode == OptimizeFor::PRICE) ? static_min_price[u][i]
+                                                         : static_min_duration[u][i];
+          if (weight < b_best[u]) {
+            if (!b_seen[u]) {
+              b_seen[u] = true;
+              b_visited.push_back(u);
+            }
+            b_best[u] = weight;
+            b_pq.push({weight, static_cast<uint32_t>(u)});
+            b_edges[u].push_back({dest_id, -1, weight});
+          }
+        }
+      }
+    }
 
     while (!f_pq.empty()) {
       auto top = f_pq.top();
@@ -261,13 +302,14 @@ public:
         uint32_t new_c = top.cost + weight;
 
         if (new_c < f_best[e.target]) {
-          if (f_best[e.target] == INF) {
+          if (!f_seen[e.target]) {
+            f_seen[e.target] = true;
             f_visited.push_back(e.target);
           }
           f_best[e.target] = new_c;
           f_pq.push({new_c, e.target});
           f_edges[e.target].push_back({u, e.middle_node, new_c});
-        } else if (new_c <= f_best[e.target] + SLACK && f_edges[e.target].size() < 3) {
+        } else if (new_c <= f_best[e.target] + SLACK && f_edges[e.target].size() < 4) {
           f_pq.push({new_c, e.target});
           f_edges[e.target].push_back({u, e.middle_node, new_c});
         }
@@ -289,16 +331,31 @@ public:
         uint32_t new_c = top.cost + weight;
 
         if (new_c < b_best[e.target]) {
-          if (b_best[e.target] == INF) {
+          if (!b_seen[e.target]) {
+            b_seen[e.target] = true;
             b_visited.push_back(e.target);
           }
           b_best[e.target] = new_c;
           b_pq.push({new_c, e.target});
           b_edges[e.target].push_back({v, e.middle_node, new_c});
-        } else if (new_c <= b_best[e.target] + SLACK && b_edges[e.target].size() < 3) {
+        } else if (new_c <= b_best[e.target] + SLACK && b_edges[e.target].size() < 4) {
           b_pq.push({new_c, e.target});
           b_edges[e.target].push_back({v, e.middle_node, new_c});
         }
+      }
+    }
+
+    // Sort parent edges so lowest cost parent is expanded first
+    for (uint32_t u : f_visited) {
+      if (f_edges[u].size() > 1) {
+        std::sort(f_edges[u].begin(), f_edges[u].end(),
+                  [](const UpEdge &a, const UpEdge &b) { return a.cost < b.cost; });
+      }
+    }
+    for (uint32_t v : b_visited) {
+      if (b_edges[v].size() > 1) {
+        std::sort(b_edges[v].begin(), b_edges[v].end(),
+                  [](const UpEdge &a, const UpEdge &b) { return a.cost < b.cost; });
       }
     }
 
@@ -309,8 +366,14 @@ public:
         meeting_nodes.push_back(u);
       }
     }
-    if (b_best[source_id] != INF) {
+    if (b_best[source_id] != INF && !f_seen[source_id]) {
       meeting_nodes.push_back(source_id);
+    } else if (b_best[source_id] != INF) {
+      bool found = false;
+      for (uint32_t m : meeting_nodes) {
+        if (m == source_id) { found = true; break; }
+      }
+      if (!found) meeting_nodes.push_back(source_id);
     }
 
     if (meeting_nodes.empty()) {
@@ -358,7 +421,7 @@ public:
     };
 
     std::vector<std::vector<uint32_t>> corridors;
-    for (size_t i = 0; i < std::min<size_t>(meeting_nodes.size(), 15); ++i) {
+    for (size_t i = 0; i < std::min<size_t>(meeting_nodes.size(), 25); ++i) {
       uint32_t m = meeting_nodes[i];
 
       std::vector<std::pair<uint32_t, int32_t>> tmp_f;
@@ -392,13 +455,13 @@ public:
             corridors.push_back(std::move(corridor));
             added++;
           }
-          if (added >= 3 || corridors.size() >= 35)
+          if (added >= 4 || corridors.size() >= 50)
             break;
         }
-        if (added >= 3 || corridors.size() >= 35)
+        if (added >= 4 || corridors.size() >= 50)
           break;
       }
-      if (corridors.size() >= 35)
+      if (corridors.size() >= 50)
         break;
     }
 
