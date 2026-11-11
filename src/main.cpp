@@ -1,9 +1,9 @@
 #include "Algorithms/AStar.hpp"
 #include "Algorithms/BFS.hpp"
+#include "Algorithms/ContractionHierarchies.hpp"
 #include "Algorithms/Dijkstra.hpp"
 #include "Algorithms/LabelCorrecting.hpp"
 #include "Algorithms/RCAStar.hpp"
-#include "Algorithms/RCAStarHubRouter.hpp"
 #include "Algorithms/TwoPhaseHubRouter.hpp"
 #include "Algorithms/TwoPhaseRouter.hpp"
 #include "Algorithms/Yen.hpp"
@@ -268,6 +268,22 @@ int main() {
       static_cast<uint32_t>(static_cast<int32_t>(start_day * 1440) -
                             source_utc_offset); // 00:00 local in UTC minutes
 
+  // Offline preprocessing for Contraction Hierarchies (one-time global graph
+  // build)
+  static ContractionHierarchiesRouter::CHGraph ch_graph_price;
+  static ContractionHierarchiesRouter::CHGraph ch_graph_time;
+  ContractionHierarchiesRouter ch_router;
+  if (!ch_graph_price.is_preprocessed) {
+    ch_router.preprocess(
+        loader.static_route_graph, loader.static_route_min_price,
+        loader.static_route_min_duration, ch_graph_price, OptimizeFor::PRICE);
+  }
+  if (!ch_graph_time.is_preprocessed) {
+    ch_router.preprocess(
+        loader.static_route_graph, loader.static_route_min_price,
+        loader.static_route_min_duration, ch_graph_time, OptimizeFor::TIME);
+  }
+
   std::vector<RunStats> benchmarks;
 
   // 1. Classical Dijkstra
@@ -337,27 +353,27 @@ int main() {
     benchmarks.push_back({"RC-A*", "fastest", duration.count(), res});
   }
 
-  // 4. Resource-Constrained A* with Hubs (RC-A* over Aviation Hubs)
-  RCAStarHubRouter rc_astar_hub_router;
+  // 4. Contraction Hierarchies (Bidirectional Upward Query + Shortcut
+  // Unpacking)
   {
     auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = rc_astar_hub_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.reverse_static_graph,
-        loader.nodes, OptimizeFor::PRICE, absolute_start_time,
-        RCAStarHubRouter::ResourceConstraints{2880, 50000, 5, 35});
+    RoutingResult res = ch_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
+        loader.static_route_min_price, loader.static_route_min_duration,
+        loader.nodes, OptimizeFor::PRICE, absolute_start_time, ch_graph_price);
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"RC-A* Hub", "cheapest", duration.count(), res});
+    benchmarks.push_back({"Contraction", "cheapest", duration.count(), res});
   }
   {
     auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = rc_astar_hub_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.reverse_static_graph,
-        loader.nodes, OptimizeFor::TIME, absolute_start_time,
-        RCAStarHubRouter::ResourceConstraints{2880, 50000, 5, 35});
+    RoutingResult res = ch_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
+        loader.static_route_min_price, loader.static_route_min_duration,
+        loader.nodes, OptimizeFor::TIME, absolute_start_time, ch_graph_time);
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"RC-A* Hub", "fastest", duration.count(), res});
+    benchmarks.push_back({" hierarchy", "fastest", duration.count(), res});
   }
 
   // 5. Label-Correcting Algorithm (SPPRC Bellman-Ford variant)

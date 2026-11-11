@@ -23,15 +23,14 @@
 - [x] Two-Phase Router with hubs
 - [x] Yen's Algorithm
 - [x] A* Search (Haversine heuristic)
-- [ ] RC-A* with hubs
 - [x] Resource-Constrained A* (RC-A* with heuristic look-ahead)
 - [x] Label-Correcting Algorithm (SPPRC Bellman-Ford variant)
 - [ ] The Pulse Algorithm (DFS with bounding and rollback)
 - [ ] Lagrangian Relaxation (Dynamic penalty multipliers)
 - [ ] Column Generation (Master/subproblem fleet optimization)
 - [ ] Metaheuristics (Genetic Algorithms / Ant Colony Optimization)
-- [ ] Contraction Hierarchies (Offline node contraction)
-- [ ] Contraction Hierarchies (Live query)
+- [x] Contraction Hierarchies (Offline node contraction)
+- [x] Contraction Hierarchies (Live query)
 - [ ] ALT Preprocessing (Landmark selection & triangle inequality)
 
 

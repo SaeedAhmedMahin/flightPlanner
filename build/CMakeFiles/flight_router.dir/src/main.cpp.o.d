@@ -913,10 +913,7 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__functional/bind_back.h \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__functional/bind_front.h \
   /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/BFS.hpp \
-  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/LabelCorrecting.hpp \
-  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/RCAStar.hpp \
-  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/RCAStarHubRouter.hpp \
-  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/TwoPhaseHubRouter.hpp \
+  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/ContractionHierarchies.hpp \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/iostream \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/istream \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__ostream/basic_ostream.h \
@@ -972,9 +969,12 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/stack \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/print \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/unistd.h \
+  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/unordered_set \
+  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/LabelCorrecting.hpp \
+  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/RCAStar.hpp \
+  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/TwoPhaseHubRouter.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/TwoPhaseRouter.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/Yen.hpp \
-  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/unordered_set \
   /Users/saeedahmedmahin/code/flightPlanner/src/DataLoader.hpp \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/filesystem \
   /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__filesystem/copy_options.h \

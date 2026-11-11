@@ -1019,10 +1019,10 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: /Users/saeedahmedmahin/code/flightP
   /Users/saeedahmedmahin/code/flightPlanner/include/DataStructures/flight.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/AStar.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/BFS.hpp \
+  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/ContractionHierarchies.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/Dijkstra.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/LabelCorrecting.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/RCAStar.hpp \
-  /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/RCAStarHubRouter.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/SearchState.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/TwoPhaseHubRouter.hpp \
   /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/TwoPhaseRouter.hpp \
@@ -1041,6 +1041,8 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: /Users/saeedahmedmahin/code/flightP
 /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/RCAStar.hpp:
 
 /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/LabelCorrecting.hpp:
+
+/Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/ContractionHierarchies.hpp:
 
 /Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/AStar.hpp:
 
@@ -1657,8 +1659,6 @@ CMakeFiles/flight_router.dir/src/main.cpp.o: /Users/saeedahmedmahin/code/flightP
 /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__random/log2.h:
 
 /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__random/is_valid.h:
-
-/Users/saeedahmedmahin/code/flightPlanner/include/Algorithms/RCAStarHubRouter.hpp:
 
 /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__vector/erase.h:
 
