@@ -19,73 +19,98 @@ struct RunStats {
 };
 
 void print_performance_summary(const std::vector<RunStats> &benchmarks) {
-  std::cout << "\n======================================================\n";
-  std::cout << "                 ALGORITHM BENCHMARKS                 \n";
-  std::cout << "======================================================\n";
+  std::cout << "\n+-----------------+------------+------------+----------------+----------------+----------+----------------+\n";
+  std::cout << "| " << std::left << std::setw(15) << "Algorithm"
+            << " | " << std::setw(10) << "Version"
+            << " | " << std::right << std::setw(10) << "Time"
+            << " | " << std::setw(14) << "Nodes Explored"
+            << " | " << std::setw(14) << "Edges Relaxed"
+            << " | " << std::setw(8) << "Cost"
+            << " | " << std::setw(14) << "Time Required"
+            << " |\n";
+  std::cout << "+-----------------+------------+------------+----------------+----------------+----------+----------------+\n";
 
-  std::string current_algo = "";
+  std::string last_algo = "";
   for (const auto &bench : benchmarks) {
-    if (bench.algo_name != current_algo) {
-      current_algo = bench.algo_name;
-      std::cout << current_algo << ":\n";
+    std::string display_algo = "";
+    if (bench.algo_name != last_algo) {
+      display_algo = bench.algo_name;
+      last_algo = bench.algo_name;
     }
 
-    std::cout << "   " << std::left << std::setw(10) << bench.mode_label << ": "
-              << std::right << std::setw(5) << (bench.compute_time_us / 1000)
-              << "." << std::setw(2) << std::setfill('0')
-              << ((bench.compute_time_us % 1000) / 10) << std::setfill(' ')
-              << " ms";
-
-    if (bench.result.success) {
-      std::cout << "  (nodes: " << std::setw(5)
-                << bench.result.metrics.nodes_explored
-                << ", relaxed: " << std::setw(8)
-                << bench.result.metrics.edges_relaxed << ")";
-
-      if (bench.mode_label == "cheapest") {
-        std::cout << " -> $" << bench.result.total_price;
-      } else {
-        std::cout << " -> " << bench.result.total_time_mins / 60 << "h "
-                  << bench.result.total_time_mins % 60 << "m";
-      }
+    std::string time_str;
+    if (bench.compute_time_us >= 1000000) {
+      double sec = bench.compute_time_us / 1000000.0;
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(2) << sec << " s";
+      time_str = oss.str();
     } else {
-      std::cout << "  [No Route Found]";
+      double ms = bench.compute_time_us / 1000.0;
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(2) << ms << " ms";
+      time_str = oss.str();
     }
-    std::cout << "\n";
+
+    std::string cost_str = bench.result.success ? ("$" + std::to_string(bench.result.total_price)) : "N/A";
+    std::string journey_str = bench.result.success
+                                  ? (std::to_string(bench.result.total_time_mins / 60) + "h " +
+                                     std::to_string(bench.result.total_time_mins % 60) + "m")
+                                  : "N/A";
+    std::string nodes_str = bench.result.success ? std::to_string(bench.result.metrics.nodes_explored) : "N/A";
+    std::string edges_str = bench.result.success ? std::to_string(bench.result.metrics.edges_relaxed) : "N/A";
+
+    std::cout << "| " << std::left << std::setw(15) << display_algo
+              << " | " << std::setw(10) << bench.mode_label
+              << " | " << std::right << std::setw(10) << time_str
+              << " | " << std::setw(14) << nodes_str
+              << " | " << std::setw(14) << edges_str
+              << " | " << std::setw(8) << cost_str
+              << " | " << std::setw(14) << journey_str
+              << " |\n";
   }
-  std::cout << "======================================================\n";
+  std::cout << "+-----------------+------------+------------+----------------+----------------+----------+----------------+\n";
 }
 
-void print_route_path(const RunStats &run, const DataLoader &loader,
-                      uint32_t source_id) {
-  std::cout << "======================================================";
-  std::cout << "\n=== " << run.algo_name << " [" << run.mode_label
-            << "] ROUTE ===\n";
-  if (!run.result.success) {
+// Helper to serialize path for unique deduplication
+std::string serialize_flight_path(const std::vector<flight> &path) {
+  std::string key = "";
+  for (const auto &f : path) {
+    key += std::to_string(f.flight_details_id) + ";" +
+           std::to_string(f.destination_id) + ";" +
+           std::to_string(f.flight_day) + ";" +
+           std::to_string(f.departure_time) + "|";
+  }
+  return key;
+}
+
+void print_itinerary_details(const std::string &title, const RoutingResult &result,
+                             const DataLoader &loader, uint32_t source_id) {
+  std::cout << "\n======================================================\n";
+  std::cout << "=== " << title << " ===\n";
+  if (!result.success) {
     std::cout << "Status: No valid route found.\n";
+    std::cout << "======================================================\n";
     return;
   }
 
-  std::cout << "Total Price: $" << run.result.total_price
-            << "  |  Total Time: " << run.result.total_time_mins / 60 << "h "
-            << run.result.total_time_mins % 60 << "m\n";
+  std::cout << "Total Price: $" << result.total_price
+            << "  |  Total Time: " << result.total_time_mins / 60 << "h "
+            << result.total_time_mins % 60 << "m\n";
   std::cout << "======================================================\n";
 
   uint32_t current_airport_id = source_id;
 
-  for (size_t i = 0; i < run.result.path.size(); ++i) {
-    const flight &f = run.result.path[i];
+  for (size_t i = 0; i < result.path.size(); ++i) {
+    const flight &f = result.path[i];
     const flightDetails &f_ui = loader.ui_flights[f.flight_details_id];
     std::string origin_iata = loader.ui_nodes[current_airport_id].iata_code;
     std::string dest_iata = loader.ui_nodes[f.destination_id].iata_code;
     std::string airline_full_name = loader.get_airline_name(f_ui.airline_code);
 
-    // Flight duration from the precomputed wall-clock duration (timezone-aware)
     uint32_t flight_dur_min = f.duration_mins;
     uint32_t dur_h = flight_dur_min / 60;
     uint32_t dur_m = flight_dur_min % 60;
 
-    // Local departure/arrival times for display (these are correctly in local time)
     uint32_t dep_min = f.departure_time;
     uint32_t arr_min = f.arrival_time;
 
@@ -106,9 +131,8 @@ void print_route_path(const RunStats &run, const DataLoader &loader,
       std::cout << " " << dur_m << " mins";
     std::cout << ")\n";
 
-    // If there is a next flight in the itinerary, display the transit banner
-    if (i + 1 < run.result.path.size()) {
-      const flight &next_f = run.result.path[i + 1];
+    if (i + 1 < result.path.size()) {
+      const flight &next_f = result.path[i + 1];
       int32_t origin_utc_offset = loader.nodes[current_airport_id].utc_offset_15m * 15;
       uint32_t dep_utc = static_cast<uint32_t>(
           static_cast<int32_t>(f.flight_day * 1440 + f.departure_time) - origin_utc_offset);
@@ -134,6 +158,54 @@ void print_route_path(const RunStats &run, const DataLoader &loader,
     }
 
     current_airport_id = f.destination_id;
+  }
+}
+
+void print_unique_routes(const std::vector<RunStats> &benchmarks,
+                         const DataLoader &loader, uint32_t source_id) {
+  struct UniqueGroup {
+    RoutingResult result;
+    std::vector<std::pair<std::string, std::string>> algo_versions;
+  };
+
+  std::vector<std::string> order;
+  std::unordered_map<std::string, UniqueGroup> groups;
+
+  for (const auto &bench : benchmarks) {
+    if (!bench.result.success) continue;
+    std::string key = serialize_flight_path(bench.result.path);
+    if (groups.find(key) == groups.end()) {
+      order.push_back(key);
+      groups[key] = {bench.result, {}};
+    }
+    groups[key].algo_versions.push_back({bench.algo_name, bench.mode_label});
+  }
+
+  for (const auto &key : order) {
+    const auto &grp = groups[key];
+
+    std::vector<std::string> algo_order;
+    std::unordered_map<std::string, std::vector<std::string>> algo_map;
+    for (const auto &av : grp.algo_versions) {
+      if (algo_map.find(av.first) == algo_map.end()) {
+        algo_order.push_back(av.first);
+      }
+      algo_map[av.first].push_back(av.second);
+    }
+
+    std::string title = "";
+    for (size_t i = 0; i < algo_order.size(); ++i) {
+      if (i > 0) title += ", ";
+      title += algo_order[i] + " [";
+      const auto &vers = algo_map[algo_order[i]];
+      for (size_t v = 0; v < vers.size(); ++v) {
+        if (v > 0) title += ", ";
+        title += vers[v];
+      }
+      title += "]";
+    }
+
+    print_itinerary_details(title, grp.result, loader, source_id);
   }
 }
 
@@ -324,10 +396,8 @@ int main() {
   // --- OUTPUT ALL PERFORMANCES FIRST ON TOP ---
   print_performance_summary(benchmarks);
 
-  // --- OUTPUT DETAILED PATHS BELOW ---
-  for (const auto &run : benchmarks) {
-    print_route_path(run, loader, source_id);
-  }
+  // --- OUTPUT UNIQUE PATHS ONCE (CONSOLIDATED) ---
+  print_unique_routes(benchmarks, loader, source_id);
 
   // --- OUTPUT YEN'S TOP-K ALTERNATIVE PATHS & "BEST FLIGHT" RECOMMENDATION ---
   if (!yen_k_cheapest.k_paths.empty()) {
@@ -363,8 +433,7 @@ int main() {
               << std::setprecision(2) << best.generalized_cost
               << " (Value of Time: $25.00/hr, Layover Penalty: $15/stop)\n";
 
-    RunStats best_run = {"Best-Choice", "recommended", 0, best.result};
-    print_route_path(best_run, loader, source_id);
+    print_itinerary_details("Best-Choice [recommended]", best.result, loader, source_id);
   }
 
   return 0;
