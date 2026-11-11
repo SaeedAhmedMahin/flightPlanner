@@ -2,8 +2,10 @@
 #include "Algorithms/BFS.hpp"
 #include "Algorithms/Dijkstra.hpp"
 #include "Algorithms/LabelCorrecting.hpp"
-#include "Algorithms/TwoPhaseRouter.hpp"
+#include "Algorithms/RCAStar.hpp"
+#include "Algorithms/RCAStarHubRouter.hpp"
 #include "Algorithms/TwoPhaseHubRouter.hpp"
+#include "Algorithms/TwoPhaseRouter.hpp"
 #include "Algorithms/Yen.hpp"
 #include "DataLoader.hpp"
 #include <chrono>
@@ -19,7 +21,8 @@ struct RunStats {
 };
 
 void print_performance_summary(const std::vector<RunStats> &benchmarks) {
-  std::cout << "\n+-----------------+------------+------------+----------------+----------------+----------+----------------+\n";
+  std::cout << "\n+-----------------+------------+------------+----------------"
+               "+----------------+----------+----------------+\n";
   std::cout << "| " << std::left << std::setw(15) << "Algorithm"
             << " | " << std::setw(10) << "Version"
             << " | " << std::right << std::setw(10) << "Time"
@@ -28,7 +31,8 @@ void print_performance_summary(const std::vector<RunStats> &benchmarks) {
             << " | " << std::setw(8) << "Cost"
             << " | " << std::setw(14) << "Time Required"
             << " |\n";
-  std::cout << "+-----------------+------------+------------+----------------+----------------+----------+----------------+\n";
+  std::cout << "+-----------------+------------+------------+----------------+-"
+               "---------------+----------+----------------+\n";
 
   std::string last_algo = "";
   for (const auto &bench : benchmarks) {
@@ -51,24 +55,32 @@ void print_performance_summary(const std::vector<RunStats> &benchmarks) {
       time_str = oss.str();
     }
 
-    std::string cost_str = bench.result.success ? ("$" + std::to_string(bench.result.total_price)) : "N/A";
-    std::string journey_str = bench.result.success
-                                  ? (std::to_string(bench.result.total_time_mins / 60) + "h " +
-                                     std::to_string(bench.result.total_time_mins % 60) + "m")
-                                  : "N/A";
-    std::string nodes_str = bench.result.success ? std::to_string(bench.result.metrics.nodes_explored) : "N/A";
-    std::string edges_str = bench.result.success ? std::to_string(bench.result.metrics.edges_relaxed) : "N/A";
+    std::string cost_str =
+        bench.result.success ? ("$" + std::to_string(bench.result.total_price))
+                             : "N/A";
+    std::string journey_str =
+        bench.result.success
+            ? (std::to_string(bench.result.total_time_mins / 60) + "h " +
+               std::to_string(bench.result.total_time_mins % 60) + "m")
+            : "N/A";
+    std::string nodes_str =
+        bench.result.success
+            ? std::to_string(bench.result.metrics.nodes_explored)
+            : "N/A";
+    std::string edges_str =
+        bench.result.success
+            ? std::to_string(bench.result.metrics.edges_relaxed)
+            : "N/A";
 
-    std::cout << "| " << std::left << std::setw(15) << display_algo
-              << " | " << std::setw(10) << bench.mode_label
-              << " | " << std::right << std::setw(10) << time_str
-              << " | " << std::setw(14) << nodes_str
-              << " | " << std::setw(14) << edges_str
-              << " | " << std::setw(8) << cost_str
-              << " | " << std::setw(14) << journey_str
-              << " |\n";
+    std::cout << "| " << std::left << std::setw(15) << display_algo << " | "
+              << std::setw(10) << bench.mode_label << " | " << std::right
+              << std::setw(10) << time_str << " | " << std::setw(14)
+              << nodes_str << " | " << std::setw(14) << edges_str << " | "
+              << std::setw(8) << cost_str << " | " << std::setw(14)
+              << journey_str << " |\n";
   }
-  std::cout << "+-----------------+------------+------------+----------------+----------------+----------+----------------+\n";
+  std::cout << "+-----------------+------------+------------+----------------+-"
+               "---------------+----------+----------------+\n";
 }
 
 // Helper to serialize path for unique deduplication
@@ -83,7 +95,8 @@ std::string serialize_flight_path(const std::vector<flight> &path) {
   return key;
 }
 
-void print_itinerary_details(const std::string &title, const RoutingResult &result,
+void print_itinerary_details(const std::string &title,
+                             const RoutingResult &result,
                              const DataLoader &loader, uint32_t source_id) {
   std::cout << "\n======================================================\n";
   std::cout << "=== " << title << " ===\n";
@@ -133,23 +146,30 @@ void print_itinerary_details(const std::string &title, const RoutingResult &resu
 
     if (i + 1 < result.path.size()) {
       const flight &next_f = result.path[i + 1];
-      int32_t origin_utc_offset = loader.nodes[current_airport_id].utc_offset_15m * 15;
+      int32_t origin_utc_offset =
+          loader.nodes[current_airport_id].utc_offset_15m * 15;
       uint32_t dep_utc = static_cast<uint32_t>(
-          static_cast<int32_t>(f.flight_day * 1440 + f.departure_time) - origin_utc_offset);
+          static_cast<int32_t>(f.flight_day * 1440 + f.departure_time) -
+          origin_utc_offset);
       uint32_t arr_utc = dep_utc + f.duration_mins;
 
-      int32_t dest_utc_offset = loader.nodes[f.destination_id].utc_offset_15m * 15;
-      uint32_t next_dep_utc = static_cast<uint32_t>(
-          static_cast<int32_t>(next_f.flight_day * 1440 + next_f.departure_time) - dest_utc_offset);
+      int32_t dest_utc_offset =
+          loader.nodes[f.destination_id].utc_offset_15m * 15;
+      uint32_t next_dep_utc =
+          static_cast<uint32_t>(static_cast<int32_t>(next_f.flight_day * 1440 +
+                                                     next_f.departure_time) -
+                                dest_utc_offset);
 
-      uint32_t transit_min = (next_dep_utc >= arr_utc) ? (next_dep_utc - arr_utc) : 0;
+      uint32_t transit_min =
+          (next_dep_utc >= arr_utc) ? (next_dep_utc - arr_utc) : 0;
       uint32_t lay_h = transit_min / 60;
       uint32_t lay_m = transit_min % 60;
 
       std::cout << "\n(";
       if (lay_h > 0) {
         std::cout << lay_h << " hour" << (lay_h != 1 ? "s" : "");
-        if (lay_m > 0) std::cout << " ";
+        if (lay_m > 0)
+          std::cout << " ";
       }
       if (lay_m > 0 || lay_h == 0) {
         std::cout << lay_m << " mins";
@@ -172,7 +192,8 @@ void print_unique_routes(const std::vector<RunStats> &benchmarks,
   std::unordered_map<std::string, UniqueGroup> groups;
 
   for (const auto &bench : benchmarks) {
-    if (!bench.result.success) continue;
+    if (!bench.result.success)
+      continue;
     std::string key = serialize_flight_path(bench.result.path);
     if (groups.find(key) == groups.end()) {
       order.push_back(key);
@@ -195,11 +216,13 @@ void print_unique_routes(const std::vector<RunStats> &benchmarks,
 
     std::string title = "";
     for (size_t i = 0; i < algo_order.size(); ++i) {
-      if (i > 0) title += ", ";
+      if (i > 0)
+        title += ", ";
       title += algo_order[i] + " [";
       const auto &vers = algo_map[algo_order[i]];
       for (size_t v = 0; v < vers.size(); ++v) {
-        if (v > 0) title += ", ";
+        if (v > 0)
+          title += ", ";
         title += vers[v];
       }
       title += "]";
@@ -241,8 +264,9 @@ int main() {
 
   uint32_t start_day = DataLoader::parse_date_to_days(target_date);
   int32_t source_utc_offset = loader.nodes[source_id].utc_offset_15m * 15;
-  uint32_t absolute_start_time = static_cast<uint32_t>(
-      static_cast<int32_t>(start_day * 1440) - source_utc_offset); // 00:00 local in UTC minutes
+  uint32_t absolute_start_time =
+      static_cast<uint32_t>(static_cast<int32_t>(start_day * 1440) -
+                            source_utc_offset); // 00:00 local in UTC minutes
 
   std::vector<RunStats> benchmarks;
 
@@ -288,7 +312,55 @@ int main() {
     benchmarks.push_back({"A*", "fastest", duration.count(), res});
   }
 
-  // 3. Label-Correcting Algorithm (SPPRC Bellman-Ford variant)
+  // 3. Resource-Constrained A* (RC-A* with Multi-Dimensional Heuristic
+  // Look-Ahead)
+  RCAStarRouter rc_astar_router;
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = rc_astar_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        OptimizeFor::PRICE, absolute_start_time,
+        RCAStarRouter::ResourceConstraints{
+            2880, 50000, 5}); // 48h max time, $50k max price, 5 hops
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"RC-A*", "cheapest", duration.count(), res});
+  }
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = rc_astar_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        OptimizeFor::TIME, absolute_start_time,
+        RCAStarRouter::ResourceConstraints{2880, 50000, 5});
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"RC-A*", "fastest", duration.count(), res});
+  }
+
+  // 4. Resource-Constrained A* with Hubs (RC-A* over Aviation Hubs)
+  RCAStarHubRouter rc_astar_hub_router;
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = rc_astar_hub_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.reverse_static_graph,
+        loader.nodes, OptimizeFor::PRICE, absolute_start_time,
+        RCAStarHubRouter::ResourceConstraints{2880, 50000, 5, 35});
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"RC-A* Hub", "cheapest", duration.count(), res});
+  }
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = rc_astar_hub_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.reverse_static_graph,
+        loader.nodes, OptimizeFor::TIME, absolute_start_time,
+        RCAStarHubRouter::ResourceConstraints{2880, 50000, 5, 35});
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"RC-A* Hub", "fastest", duration.count(), res});
+  }
+
+  // 5. Label-Correcting Algorithm (SPPRC Bellman-Ford variant)
   LabelCorrectingRouter label_correcting_router;
   {
     auto start = std::chrono::high_resolution_clock::now();
@@ -420,7 +492,7 @@ int main() {
     }
 
     std::cout << "\n======================================================\n";
-    std::cout << "       BEST FLIGHTS \n";
+    std::cout << "       BEST FLIGHTS Yen's Algo\n";
     std::cout << "======================================================\n";
     const auto &best = yen_k_cheapest.best_recommendation;
     std::cout << "Recommended Choice: $" << best.result.total_price << " ("
@@ -433,7 +505,8 @@ int main() {
               << std::setprecision(2) << best.generalized_cost
               << " (Value of Time: $25.00/hr, Layover Penalty: $15/stop)\n";
 
-    print_itinerary_details("Best-Choice [recommended]", best.result, loader, source_id);
+    print_itinerary_details("Best-Choice [recommended]", best.result, loader,
+                            source_id);
   }
 
   return 0;

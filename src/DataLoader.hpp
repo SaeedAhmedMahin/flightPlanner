@@ -42,6 +42,8 @@ public:
   std::vector<std::vector<flight>> adjacency_list;
   std::vector<std::vector<uint32_t>>
       static_route_graph; // Unique airport-to-airport corridors
+  std::vector<std::vector<uint32_t>>
+      reverse_static_graph; // Ingoing corridors to each airport
   std::vector<std::vector<uint16_t>>
       static_route_min_price; // Minimum ticket price on each corridor (aligned with static_route_graph)
   std::vector<std::vector<uint16_t>>
@@ -94,6 +96,7 @@ public:
     // Resize adjacency lists to exactly match the number of airports (V)
     adjacency_list.resize(nodes.size());
     static_route_graph.resize(nodes.size());
+    reverse_static_graph.resize(nodes.size());
     static_route_min_price.resize(nodes.size());
     static_route_min_duration.resize(nodes.size());
 
@@ -133,6 +136,7 @@ public:
       for (uint32_t v : neighbors) {
         min_prices.push_back(dest_stats[v].min_price);
         min_durations.push_back(dest_stats[v].min_duration);
+        reverse_static_graph[v].push_back(static_cast<uint32_t>(u));
       }
 
       static_route_graph[u] = std::move(neighbors);
