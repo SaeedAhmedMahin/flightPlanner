@@ -4,7 +4,7 @@ A high-performance C++ research project designed to benchmark, analyze, and visu
 
 ---
 
-## 🚀 Quick Run
+## Quick Run
 
 ```bash
 ./run.sh
