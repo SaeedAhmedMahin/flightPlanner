@@ -1,3 +1,4 @@
+#include "Algorithms/ALTRouter.hpp"
 #include "Algorithms/AStar.hpp"
 #include "Algorithms/BFS.hpp"
 #include "Algorithms/ColumnGeneration.hpp"
@@ -288,6 +289,16 @@ int main() {
         loader.static_route_min_duration, ch_graph_time, OptimizeFor::TIME);
   }
 
+  // Offline preprocessing for ALT (Landmark Selection & Distance Matrices)
+  static ALTRouter::LandmarkData alt_landmark_data;
+  ALTRouter alt_router;
+  if (!alt_landmark_data.is_preprocessed) {
+    ALTRouter::preprocess(
+        loader.nodes, loader.static_route_graph, loader.reverse_static_graph,
+        loader.static_route_min_price, loader.static_route_min_duration,
+        alt_landmark_data, 16);
+  }
+
   std::vector<RunStats> benchmarks;
 
   // 1. Classical Dijkstra
@@ -332,7 +343,31 @@ int main() {
     benchmarks.push_back({"A*", "fastest", duration.count(), res});
   }
 
-  // 3. Resource-Constrained A* (RC-A* with Multi-Dimensional Heuristic
+  // 3. ALT Algorithm (A* with Landmarks & Triangle Inequality Lower Bounds)
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = alt_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        loader.static_route_graph, loader.reverse_static_graph,
+        loader.static_route_min_price, loader.static_route_min_duration,
+        alt_landmark_data, OptimizeFor::PRICE, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"ALT", "cheapest", duration.count(), res});
+  }
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = alt_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        loader.static_route_graph, loader.reverse_static_graph,
+        loader.static_route_min_price, loader.static_route_min_duration,
+        alt_landmark_data, OptimizeFor::TIME, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"ALT", "fastest", duration.count(), res});
+  }
+
+  // 4. Resource-Constrained A* (RC-A* with Multi-Dimensional Heuristic
   // Look-Ahead)
   RCAStarRouter rc_astar_router;
   {

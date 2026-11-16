@@ -31,7 +31,7 @@
 - [x] Metaheuristics (Genetic Algorithms / Ant Colony Optimization)
 - [x] Contraction Hierarchies (Offline node contraction)
 - [x] Contraction Hierarchies (Live query)
-- [ ] ALT Preprocessing (Landmark selection & triangle inequality)
+- [x] ALT Preprocessing (Landmark selection & triangle inequality)
 
 
 ## 4. Terminal User Interface (FTXUI)
