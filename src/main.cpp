@@ -3,6 +3,7 @@
 #include "Algorithms/ContractionHierarchies.hpp"
 #include "Algorithms/Dijkstra.hpp"
 #include "Algorithms/LabelCorrecting.hpp"
+#include "Algorithms/PulseRouter.hpp"
 #include "Algorithms/RCAStar.hpp"
 #include "Algorithms/TwoPhaseHubRouter.hpp"
 #include "Algorithms/TwoPhaseRouter.hpp"
@@ -395,6 +396,29 @@ int main() {
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::high_resolution_clock::now() - start);
     benchmarks.push_back({"Label-Corr", "fastest", duration.count(), res});
+  }
+
+  // 6. The Pulse Algorithm (DFS with Bounding and Rollback)
+  PulseRouter pulse_router;
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = pulse_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
+        loader.static_route_min_price, loader.nodes, OptimizeFor::PRICE,
+        absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"Pulse", "cheapest", duration.count(), res});
+  }
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = pulse_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
+        loader.static_route_min_price, loader.nodes, OptimizeFor::TIME,
+        absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"Pulse", "fastest", duration.count(), res});
   }
 
   // 4. Breadth-First Search (Fewest Hops Baseline)
