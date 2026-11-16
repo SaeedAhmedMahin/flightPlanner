@@ -1,5 +1,6 @@
 #include "Algorithms/AStar.hpp"
 #include "Algorithms/BFS.hpp"
+#include "Algorithms/ColumnGeneration.hpp"
 #include "Algorithms/ContractionHierarchies.hpp"
 #include "Algorithms/Dijkstra.hpp"
 #include "Algorithms/LabelCorrecting.hpp"
@@ -443,6 +444,27 @@ int main() {
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::high_resolution_clock::now() - start);
     benchmarks.push_back({"Lagrangian", "fastest", duration.count(), res});
+  }
+
+  // 8. Column Generation (Master/Subproblem Fleet & Itinerary Optimization)
+  ColumnGenerationRouter cg_router;
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = cg_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        OptimizeFor::PRICE, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"Column-Gen", "cheapest", duration.count(), res});
+  }
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = cg_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        OptimizeFor::TIME, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"Column-Gen", "fastest", duration.count(), res});
   }
 
   // 4. Breadth-First Search (Fewest Hops Baseline)
