@@ -18,7 +18,6 @@
 ## 3. Algorithms & Routing
 - [x] Multi-criteria edge weighting (Scalarization: cost vs. time vs. layovers)
 - [x] Dijkstra's Algorithm (Baseline control group)
-- [ ] Dijkstra with priority queue and Fenwick tree
 - [x] Two-Phase Router (Topology-First Geodesic Corridors + Schedule Sweep)
 - [x] Two-Phase Router with hubs
 - [x] Yen's Algorithm
