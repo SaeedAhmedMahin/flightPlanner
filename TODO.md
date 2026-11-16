@@ -28,7 +28,7 @@
 - [x] The Pulse Algorithm (DFS with bounding and rollback)
 - [x] Lagrangian Relaxation (Dynamic penalty multipliers)
 - [x] Column Generation (Master/subproblem fleet optimization)
-- [ ] Metaheuristics (Genetic Algorithms / Ant Colony Optimization)
+- [x] Metaheuristics (Genetic Algorithms / Ant Colony Optimization)
 - [x] Contraction Hierarchies (Offline node contraction)
 - [x] Contraction Hierarchies (Live query)
 - [ ] ALT Preprocessing (Landmark selection & triangle inequality)

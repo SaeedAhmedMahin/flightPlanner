@@ -5,6 +5,7 @@
 #include "Algorithms/Dijkstra.hpp"
 #include "Algorithms/LabelCorrecting.hpp"
 #include "Algorithms/LagrangianRelaxation.hpp"
+#include "Algorithms/MetaheuristicRouter.hpp"
 #include "Algorithms/PulseRouter.hpp"
 #include "Algorithms/RCAStar.hpp"
 #include "Algorithms/TwoPhaseHubRouter.hpp"
@@ -465,6 +466,27 @@ int main() {
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::high_resolution_clock::now() - start);
     benchmarks.push_back({"Column-Gen", "fastest", duration.count(), res});
+  }
+
+  // 9. Metaheuristics (Hybrid Genetic Algorithm & Ant Colony Optimization)
+  MetaheuristicRouter meta_router;
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = meta_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        OptimizeFor::PRICE, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"GA-ACO Meta", "cheapest", duration.count(), res});
+  }
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    RoutingResult res = meta_router.run(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        OptimizeFor::TIME, absolute_start_time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now() - start);
+    benchmarks.push_back({"GA-ACO Meta", "fastest", duration.count(), res});
   }
 
   // 4. Breadth-First Search (Fewest Hops Baseline)
