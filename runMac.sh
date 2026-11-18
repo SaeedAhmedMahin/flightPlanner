@@ -34,12 +34,6 @@ if [ "$REBUILD_NEEDED" -eq 1 ]; then
     echo ""
 fi
 
-# Run with arguments if provided ($1: source, $2: dest, $3: date)
-if [ $# -ge 3 ]; then
-    echo "✈️  Running query: $1 -> $2 on $3"
-    printf "%s\n%s\n%s\n" "$1" "$2" "$3" | ./build/flight_router
-else
-    # Interactive mode
-    ./build/flight_router "$@"
-fi
+# Run flight_router with arguments or interactively
+./build/flight_router "$@"
 

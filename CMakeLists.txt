@@ -5,14 +5,27 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Include directories
-include_directories(include)
+# FTXUI Integration (supports local checkout or FetchContent)
+include(FetchContent)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/ftxui/CMakeLists.txt")
+  add_subdirectory(external/ftxui)
+else()
+  FetchContent_Declare(ftxui
+    GIT_REPOSITORY https://github.com/ArthurSonzogni/FTXUI
+    GIT_TAG v5.0.0
+    GIT_SHALLOW TRUE
+  )
+  FetchContent_MakeAvailable(ftxui)
+endif()
 
-# Placeholder target - update as source files are added
+# Include directories
+include_directories(include src)
+
+# Target
 add_executable(flight_router src/main.cpp)
 
-#  To run:
-
-# cmake -B build     
-# cmake --build build
-# ./build/flight_router
+target_link_libraries(flight_router PRIVATE
+  ftxui::screen
+  ftxui::dom
+  ftxui::component
+)

@@ -34,7 +34,10 @@
 
 
 ## 4. Terminal User Interface (FTXUI)
-- [ ] CMake setup linking FTXUI
+- [x] CMake setup linking FTXUI
+- [x] 2 Modes Default:Customer Mode, and another is Researcher Mode 
+    - [x] Customer Mode: Simple Doesnt show the algorithm things just shows flight info =
+    - [x] Researcher Mode: Shows algo table graphs and all that information 
 - [ ] Main Menu & Input Forms (Source, Dest, Roundtrip toggle)
 - [ ] Results View (Display path, total cost, and total time)
 - [ ] Terminal World Map Visualization (Plot route coordinates)
