@@ -16,6 +16,7 @@
 #include "Algorithms/Yen.hpp"
 #include "DataLoader.hpp"
 #include "DataStructures/AirportSearch.hpp"
+#include "DataStructures/FilterParser.hpp"
 #include "TUI/TUIViews.hpp"
 
 #include <algorithm>
@@ -30,9 +31,11 @@
 #include <ftxui/screen/box.hpp>
 #include <iomanip>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 class InteractiveApp {
@@ -70,6 +73,191 @@ public:
   int selected_preference = 0;
   std::vector<std::string> preference_entries = {
       " ⭐ Best Value ", " 🏷️  Cheapest ", " ⚡ Fastest "};
+
+  // Typed Flight Needs & Filters State
+  std::string typed_filter_str;
+  FilterSpec active_spec;
+  std::vector<std::string> airline_entries = {"All Airlines"};
+  std::vector<std::string> airline_codes = {"ALL"};
+
+  // Candidate pool & filtered itineraries
+  std::vector<RoutingResult> all_candidates;
+  std::vector<RoutingResult> filtered_itineraries;
+
+  bool matches_filters(const RoutingResult &res) const {
+    if (!res.success || res.path.empty()) return false;
+
+    // 1. Stops / Transits Filter
+    size_t stops = res.path.size() - 1;
+    if (active_spec.max_stops != -1 && stops > static_cast<size_t>(active_spec.max_stops)) {
+      return false;
+    }
+
+    // 2. Airline Filter
+    if (!active_spec.target_airline_code.empty()) {
+      bool found = false;
+      for (const auto &f : res.path) {
+        if (f.flight_details_id < loader.ui_flights.size()) {
+          const std::string &code = loader.ui_flights[f.flight_details_id].airline_code;
+          if (code == active_spec.target_airline_code ||
+              (!active_spec.target_airline_name.empty() &&
+               loader.get_airline_name(code) == active_spec.target_airline_name)) {
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found) return false;
+    }
+
+    // 3. Price Filter
+    if (active_spec.max_price != -1 && res.total_price > active_spec.max_price) {
+      return false;
+    }
+
+    // 4. Departure Time Filter (Local departure minute: 0..1439)
+    if (active_spec.dep_time_start_min != -1 && active_spec.dep_time_end_min != -1) {
+      uint16_t dep_time = res.path.front().departure_time;
+      if (dep_time < active_spec.dep_time_start_min || dep_time >= active_spec.dep_time_end_min) {
+        return false;
+      }
+    }
+
+    // 5. Max Duration Filter
+    if (active_spec.max_duration_mins != -1 && res.total_time_mins > active_spec.max_duration_mins) {
+      return false;
+    }
+
+    return true;
+  }
+
+  void apply_filters() {
+    // 1. Gather available route airlines for matching
+    std::vector<std::pair<std::string, std::string>> available_airlines;
+    for (const auto &code : airline_codes) {
+      if (code != "ALL") {
+        available_airlines.push_back({code, loader.get_airline_name(code)});
+      }
+    }
+    for (const auto &entry : loader.airline_names) {
+      available_airlines.push_back({entry.first, entry.second});
+    }
+
+    active_spec = FilterParser::parse_typed_filter(typed_filter_str, available_airlines);
+
+    // If preference is typed (e.g. "cheapest", "fastest", "best")
+    if (active_spec.preference_override != -1) {
+      selected_preference = active_spec.preference_override;
+    }
+
+    filtered_itineraries.clear();
+    for (const auto &res : all_candidates) {
+      if (matches_filters(res)) {
+        filtered_itineraries.push_back(res);
+      }
+    }
+
+    if (!filtered_itineraries.empty()) {
+      // 1. Identify cheapest among filtered
+      cheapest_flight = filtered_itineraries[0];
+      for (const auto &res : filtered_itineraries) {
+        if (res.total_price < cheapest_flight.total_price) {
+          cheapest_flight = res;
+        }
+      }
+
+      // 2. Identify fastest among filtered
+      fastest_flight = filtered_itineraries[0];
+      for (const auto &res : filtered_itineraries) {
+        if (res.total_time_mins < fastest_flight.total_time_mins) {
+          fastest_flight = res;
+        }
+      }
+
+      // 3. Identify best recommended among filtered (generalized economic balance)
+      best_flight = filtered_itineraries[0];
+      double best_score = std::numeric_limits<double>::max();
+      for (const auto &res : filtered_itineraries) {
+        double score = res.total_price + (res.total_time_mins * 0.3) +
+                       ((res.path.size() - 1) * 75.0);
+        if (score < best_score) {
+          best_score = score;
+          best_flight = res;
+        }
+      }
+      best_reason =
+          (best_flight.path.size() <= 1)
+              ? "Non-stop direct flight matching your filters."
+              : "Optimal balance between ticket fare and journey duration.";
+
+      // 4. Populate alternative itineraries (excluding the chosen flight)
+      yen_alternatives.clear();
+      std::string chosen_key = serialize_path_key(
+          (selected_preference == 0)
+              ? best_flight.path
+              : (selected_preference == 1) ? cheapest_flight.path
+                                           : fastest_flight.path);
+
+      for (const auto &res : filtered_itineraries) {
+        if (serialize_path_key(res.path) != chosen_key) {
+          yen_alternatives.push_back(res);
+        }
+      }
+    } else {
+      cheapest_flight = RoutingResult{false, 0, 0, {}, {}};
+      fastest_flight = RoutingResult{false, 0, 0, {}, {}};
+      best_flight = RoutingResult{false, 0, 0, {}, {}};
+      yen_alternatives.clear();
+    }
+  }
+
+  void reset_filters() {
+    typed_filter_str.clear();
+    active_spec = FilterSpec{};
+    apply_filters();
+  }
+
+  std::string get_active_filters_description() const {
+    std::vector<std::string> parts;
+    if (active_spec.max_stops == 0) {
+      parts.push_back("Stops: Non-stop only");
+    } else if (active_spec.max_stops == 1) {
+      parts.push_back("Stops: ≤ 1 Stop");
+    } else if (active_spec.max_stops == 2) {
+      parts.push_back("Stops: ≤ 2 Stops");
+    }
+
+    if (!active_spec.target_airline_name.empty()) {
+      parts.push_back("Airline: " + active_spec.target_airline_name + " (" + active_spec.target_airline_code + ")");
+    } else if (!active_spec.target_airline_code.empty()) {
+      parts.push_back("Airline: " + active_spec.target_airline_code);
+    }
+
+    if (active_spec.max_price != -1) {
+      parts.push_back("Max Price: $" + std::to_string(active_spec.max_price));
+    }
+
+    if (!active_spec.dep_time_label.empty()) {
+      parts.push_back("Departure: " + active_spec.dep_time_label);
+    }
+
+    if (active_spec.max_duration_mins != -1) {
+      int hrs = active_spec.max_duration_mins / 60;
+      parts.push_back("Max Duration: " + std::to_string(hrs) + "h");
+    }
+
+    if (parts.empty()) {
+      return typed_filter_str.empty() ? "None" : typed_filter_str;
+    }
+
+    std::string out;
+    for (size_t i = 0; i < parts.size(); ++i) {
+      if (i > 0)
+        out += " │ ";
+      out += parts[i];
+    }
+    return out;
+  }
 
   // Mode state: starts in Customer Mode
   bool show_research_mode = false;
@@ -566,31 +754,63 @@ public:
     auto yen_start = std::chrono::high_resolution_clock::now();
     YenRouter::YenKResult yen_k = yen_router.run(
         active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::PRICE, absolute_start_time, 5);
+        OptimizeFor::PRICE, absolute_start_time, 15);
     yen_compute_us = std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::high_resolution_clock::now() - yen_start)
                          .count();
 
     AStar astar_router;
-    fastest_flight = astar_router.run(
+    RoutingResult absolute_fastest = astar_router.run(
         active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
         OptimizeFor::TIME, absolute_start_time);
 
-    best_flight = yen_k.best_recommendation.result;
-    best_reason = yen_k.best_recommendation.recommendation_reason;
-    best_gen_cost = yen_k.best_recommendation.generalized_cost;
-
-    yen_k_paths = yen_k.k_paths;
-    cheapest_flight = yen_k.k_paths.empty()
-                          ? RoutingResult{false, 0, 0, {}, {}}
-                          : yen_k.k_paths[0];
-
-    yen_alternatives.clear();
-    for (size_t i = 1; i < yen_k.k_paths.size(); ++i) {
-      yen_alternatives.push_back(yen_k.k_paths[i]);
+    all_candidates.clear();
+    std::unordered_set<std::string> seen_keys;
+    for (const auto &p : yen_k.k_paths) {
+      if (p.success && !p.path.empty()) {
+        std::string k = serialize_path_key(p.path);
+        if (seen_keys.find(k) == seen_keys.end()) {
+          seen_keys.insert(k);
+          all_candidates.push_back(p);
+        }
+      }
     }
 
-    has_results = true;
+    if (absolute_fastest.success && !absolute_fastest.path.empty()) {
+      std::string k = serialize_path_key(absolute_fastest.path);
+      if (seen_keys.find(k) == seen_keys.end()) {
+        seen_keys.insert(k);
+        all_candidates.push_back(absolute_fastest);
+      }
+    }
+
+    yen_k_paths = all_candidates;
+
+    // Dynamically populate airlines from discovered routes
+    std::set<std::string> unique_airline_codes;
+    for (const auto &res : all_candidates) {
+      for (const auto &f : res.path) {
+        if (f.flight_details_id < loader.ui_flights.size()) {
+          unique_airline_codes.insert(
+              loader.ui_flights[f.flight_details_id].airline_code);
+        }
+      }
+    }
+
+    airline_entries = {"All Airlines"};
+    airline_codes = {"ALL"};
+    for (const auto &code : unique_airline_codes) {
+      airline_codes.push_back(code);
+      std::string name = loader.get_airline_name(code);
+      if (name.size() > 14)
+        name = name.substr(0, 13) + "…";
+      airline_entries.push_back(code + " - " + name);
+    }
+
+    // Apply active filters to candidate pool
+    apply_filters();
+
+    has_results = !all_candidates.empty();
     scroll_line = 0;
 
     // 2. Researcher Suite (if Research Mode is enabled or requested)
@@ -765,6 +985,57 @@ public:
         },
         ButtonOption::Ascii());
 
+    // 3b. Typed Flight Needs Filter Component & Chips
+    InputOption filter_opt;
+    filter_opt.multiline = false;
+    filter_opt.placeholder = "e.g. non-stop, under $800, Emirates, morning, < 24h";
+    filter_opt.on_change = [&] { apply_filters(); };
+    filter_opt.on_enter = [&] { apply_filters(); };
+    Component filter_input =
+        Input(&typed_filter_str, "e.g. non-stop, under $800, Emirates, morning, < 24h", filter_opt);
+
+    Component clear_filter_btn = Button(
+        " ↺ Clear ", [&] { reset_filters(); }, ButtonOption::Ascii());
+
+    auto add_need_token = [&](const std::string &token) {
+      if (typed_filter_str.empty()) {
+        typed_filter_str = token;
+      } else if (typed_filter_str.find(token) == std::string::npos) {
+        typed_filter_str += " " + token;
+      }
+      apply_filters();
+    };
+
+    Component chip_nonstop = Button(
+        " Non-stop ", [&] { add_need_token("non-stop"); }, ButtonOption::Ascii());
+    Component chip_1stop = Button(
+        " ≤ 1 Stop ", [&] { add_need_token("1 stop"); }, ButtonOption::Ascii());
+    Component chip_p800 = Button(
+        " Under $800 ", [&] { add_need_token("under $800"); }, ButtonOption::Ascii());
+    Component chip_p1000 = Button(
+        " Under $1,000 ", [&] { add_need_token("under $1000"); }, ButtonOption::Ascii());
+    Component chip_morning = Button(
+        " Morning ", [&] { add_need_token("morning"); }, ButtonOption::Ascii());
+    Component chip_dur24 = Button(
+        " < 24h ", [&] { add_need_token("< 24h"); }, ButtonOption::Ascii());
+
+    auto quick_chips_container = Container::Horizontal({
+        chip_nonstop,
+        chip_1stop,
+        chip_p800,
+        chip_p1000,
+        chip_morning,
+        chip_dur24,
+    });
+
+    auto filters_container = Container::Vertical({
+        Container::Horizontal({
+            filter_input,
+            clear_filter_btn,
+        }),
+        quick_chips_container,
+    });
+
     // Assemble interactive component hierarchy
     auto top_header_buttons = Container::Horizontal({
         research_toggle_btn,
@@ -785,6 +1056,7 @@ public:
             day_dropdown,
             preference_toggle,
         }),
+        filters_container,
     });
 
     auto footer_controls = Container::Horizontal({
@@ -806,6 +1078,9 @@ public:
     auto renderer = Renderer(main_container, [&] {
       // Keep date synced live whenever dropdown changes
       update_target_date_from_tool();
+
+      // Keep filters synced live whenever any filter dropdown changes
+      apply_filters();
 
       // Update suggestion labels for any matches
       for (size_t i = 0; i < MAX_SUGGESTIONS; ++i) {
@@ -962,6 +1237,105 @@ public:
           color(Color::Cyan);
 
       // ---------------------------------------------------------------------
+      // FIXED COMPACT TYPED FLIGHT NEEDS FILTER BAR
+      // ---------------------------------------------------------------------
+      bool has_active_filter = active_spec.has_any_filter() || !typed_filter_str.empty();
+
+      std::string filter_badge =
+          has_active_filter
+              ? ("🔍 " + std::to_string(filtered_itineraries.size()) + "/" +
+                 std::to_string(all_candidates.size()) + " match needs")
+              : ("✈ All " + std::to_string(all_candidates.size()) + " flights shown");
+
+      // Build live badge elements for recognized criteria
+      std::vector<Element> parsed_badges;
+      if (active_spec.max_stops == 0) {
+        parsed_badges.push_back(text("[ 🛑 Non-stop ]") | bold | color(Color::GreenLight));
+        parsed_badges.push_back(text(" "));
+      } else if (active_spec.max_stops == 1) {
+        parsed_badges.push_back(text("[ 🛑 ≤ 1 Stop ]") | bold | color(Color::YellowLight));
+        parsed_badges.push_back(text(" "));
+      } else if (active_spec.max_stops == 2) {
+        parsed_badges.push_back(text("[ 🛑 ≤ 2 Stops ]") | bold | color(Color::YellowLight));
+        parsed_badges.push_back(text(" "));
+      }
+
+      if (active_spec.max_price != -1) {
+        parsed_badges.push_back(text("[ 🏷️ Max $" + std::to_string(active_spec.max_price) + " ]") | bold | color(Color::YellowLight));
+        parsed_badges.push_back(text(" "));
+      }
+
+      if (!active_spec.target_airline_code.empty()) {
+        std::string air_label = active_spec.target_airline_name.empty() ? active_spec.target_airline_code : active_spec.target_airline_name;
+        if (air_label.size() > 14) air_label = air_label.substr(0, 13) + "…";
+        parsed_badges.push_back(text("[ ✈ " + air_label + " ]") | bold | color(Color::CyanLight));
+        parsed_badges.push_back(text(" "));
+      }
+
+      if (!active_spec.dep_time_label.empty()) {
+        parsed_badges.push_back(text("[ 🌅 " + active_spec.dep_time_label + " ]") | bold | color(Color::YellowLight));
+        parsed_badges.push_back(text(" "));
+      }
+
+      if (active_spec.max_duration_mins != -1) {
+        int hrs = active_spec.max_duration_mins / 60;
+        parsed_badges.push_back(text("[ ⏱ Under " + std::to_string(hrs) + "h ]") | bold | color(Color::MagentaLight));
+        parsed_badges.push_back(text(" "));
+      }
+
+      Element badges_row;
+      if (!parsed_badges.empty()) {
+        badges_row = hbox({
+            text("  Active Needs: ") | bold | color(Color::CyanLight) | vcenter,
+            hbox(std::move(parsed_badges)) | vcenter,
+        });
+      } else if (!typed_filter_str.empty()) {
+        badges_row = text("  ℹ️  No specific flight criteria recognized in '" + typed_filter_str + "'. Showing all flights.") | dim | color(Color::YellowLight);
+      } else {
+        badges_row = text("  💡 Tip: Type your needs (e.g. 'non-stop', 'under $800', 'Emirates', 'morning', '< 24h') or click a chip below") | dim;
+      }
+
+      auto filters_window = window(
+          hbox({
+              text(" 🎛️  TYPE YOUR NEEDS (FILTERS) ") | bold |
+                  (has_active_filter ? color(Color::YellowLight)
+                                     : color(Color::CyanLight)),
+              filler(),
+              text(" " + filter_badge + " ") |
+                  (has_active_filter ? color(Color::YellowLight)
+                                     : color(Color::GreenLight)) |
+                  bold,
+          }),
+          vbox({
+              hbox({
+                  text(" Your Needs: ") | bold | vcenter,
+                  filter_input->Render() | size(WIDTH, EQUAL, 52) | color(Color::White) | borderLight,
+                  text(" "),
+                  clear_filter_btn->Render() |
+                      (has_active_filter ? color(Color::RedLight)
+                                         : color(Color::GrayLight)),
+                  filler(),
+              }),
+              badges_row,
+              hbox({
+                  text(" Quick Needs: ") | dim | vcenter,
+                  chip_nonstop->Render(),
+                  text(" "),
+                  chip_1stop->Render(),
+                  text(" "),
+                  chip_p800->Render(),
+                  text(" "),
+                  chip_p1000->Render(),
+                  text(" "),
+                  chip_morning->Render(),
+                  text(" "),
+                  chip_dur24->Render(),
+                  filler(),
+              }),
+          })) |
+          color(has_active_filter ? Color::Yellow : Color::Cyan);
+
+      // ---------------------------------------------------------------------
       // SCROLLABLE BODY: CUSTOMER SECTION + (OPTIONAL) RESEARCH SECTION
       // ---------------------------------------------------------------------
       std::vector<Element> customer_elements;
@@ -998,10 +1372,22 @@ public:
               active_source_id, chosen_color, chosen_color, true));
         } else {
           customer_elements.push_back(
-              window(text(" Flight Results ") | bold,
-                     text(" No valid flight route found for this date.") |
-                         color(Color::RedLight)) |
-              color(Color::RedLight));
+              window(
+                  text(" ⚠️  NO FLIGHTS MATCH CURRENT FILTERS ") | bold |
+                      color(Color::YellowLight),
+                  vbox({
+                      text(" None of the " +
+                           std::to_string(all_candidates.size()) +
+                           " available itineraries match your active filter criteria:") |
+                          color(Color::White),
+                      text("   • " + get_active_filters_description()) |
+                          color(Color::YellowLight) | bold,
+                      text(" "),
+                      text(" Tip: Click [ ↺ Reset Filters ] on the filters bar "
+                           "above or relax your stops/price criteria.") |
+                          color(Color::GrayLight),
+                  })) |
+              color(Color::YellowLight));
         }
 
         // Summary Comparison Cards
@@ -1401,6 +1787,7 @@ public:
       return vbox({
           top_bar,
           form_window,
+          filters_window,
           scrollable_viewport,
           separatorLight(),
           footer_bar,
@@ -1451,18 +1838,18 @@ public:
         return true;
       }
       if (event == Event::Home && !source_input->Focused() &&
-          !dest_input->Focused()) {
+          !dest_input->Focused() && !filter_input->Focused()) {
         scroll_line = 0;
         return true;
       }
       if (event == Event::End && !source_input->Focused() &&
-          !dest_input->Focused()) {
+          !dest_input->Focused() && !filter_input->Focused()) {
         scroll_line = get_max_scroll();
         return true;
       }
 
       // 'j' / 'k' vim-style scroll & 'q' exit ONLY when not typing in an input
-      if (!source_input->Focused() && !dest_input->Focused()) {
+      if (!source_input->Focused() && !dest_input->Focused() && !filter_input->Focused()) {
         if (event == Event::Character('j')) {
           scroll_line = std::min(get_max_scroll(), scroll_line + 3);
           return true;

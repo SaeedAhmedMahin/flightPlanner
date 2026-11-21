@@ -41,8 +41,8 @@
 - [x] Main Menu & Input Forms (Source, Dest, Roundtrip toggle)
 - [x] Results View (Display path, total cost, and total time)
 - [ ] Terminal World Map Visualization (Plot route coordinates)
-- [ ] Separate User Version and Researcher Version
-     - [ ] Add Filtering using airlines, transits, time range, price range etc (whatever is in google flights filter option)
+- [x] Separate User Version and Researcher Version
+     - [x] Add Filtering using airlines, transits, time range, price range etc (natural typed text input e.g. "non-stop", "under $800", "Emirates", "morning", "< 24h" + clickable quick chips)
      - [x] Also make sure We can search by just named Bangkok or even bang and we get the options automatically including DMK and BKK
 
 ## 5. Research & Benchmarking
