@@ -15,6 +15,7 @@
 #include "Algorithms/TwoPhaseRouter.hpp"
 #include "Algorithms/Yen.hpp"
 #include "DataLoader.hpp"
+#include "DataStructures/AirportSearch.hpp"
 #include "TUI/TUIViews.hpp"
 
 #include <algorithm>
@@ -42,6 +43,16 @@ public:
   std::string source_str;
   std::string dest_str;
   std::string target_date_str;
+
+  // Live Airport Search & Suggestion Options
+  std::vector<AirportSearch::AirportMatch> src_matches;
+  std::vector<AirportSearch::AirportMatch> dst_matches;
+  constexpr static size_t MAX_SUGGESTIONS = 4;
+
+  void update_suggestions() {
+    src_matches = AirportSearch::search_airports(source_str, loader, MAX_SUGGESTIONS);
+    dst_matches = AirportSearch::search_airports(dest_str, loader, MAX_SUGGESTIONS);
+  }
 
   // Date Tool State
   int year_idx = 0;
@@ -104,6 +115,7 @@ public:
 
     parse_initial_date(init_date);
     update_research_btn_label();
+    update_suggestions();
   }
 
   void update_research_btn_label() {
@@ -519,19 +531,26 @@ public:
     update_target_date_from_tool();
     researcher_benchmarks.clear(); // Always invalidate stale benchmarks
 
-    source_str = to_upper_trimmed(source_str);
-    dest_str = to_upper_trimmed(dest_str);
+    std::string orig_src = source_str;
+    std::string orig_dst = dest_str;
 
-    if (loader.iata_to_id.find(source_str) == loader.iata_to_id.end()) {
-      status_message = "❌ Origin IATA '" + source_str + "' not found.";
+    std::string resolved_src = AirportSearch::resolve_airport_code(source_str, loader);
+    std::string resolved_dst = AirportSearch::resolve_airport_code(dest_str, loader);
+
+    if (resolved_src.empty() || loader.iata_to_id.find(resolved_src) == loader.iata_to_id.end()) {
+      status_message = "❌ Origin airport not found for '" + source_str + "'. Try city, country or IATA code.";
       has_results = false;
       return;
     }
-    if (loader.iata_to_id.find(dest_str) == loader.iata_to_id.end()) {
-      status_message = "❌ Destination IATA '" + dest_str + "' not found.";
+    if (resolved_dst.empty() || loader.iata_to_id.find(resolved_dst) == loader.iata_to_id.end()) {
+      status_message = "❌ Destination airport not found for '" + dest_str + "'. Try city, country or IATA code.";
       has_results = false;
       return;
     }
+
+    source_str = resolved_src;
+    dest_str = resolved_dst;
+    update_suggestions();
 
     active_source_id = loader.iata_to_id[source_str];
     active_dest_id = loader.iata_to_id[dest_str];
@@ -579,9 +598,15 @@ public:
       run_research_suite();
     }
 
-    status_message = "✅ " + source_str + " ──▶ " + dest_str + " (" +
-                     target_date_str + ")  |  " +
-                     std::to_string(yen_k_paths.size()) + " itineraries found";
+    if (orig_src != source_str || orig_dst != dest_str) {
+      status_message = "✅ Resolved: '" + orig_src + "' ➔ " + source_str +
+                       ", '" + orig_dst + "' ➔ " + dest_str + "  |  " +
+                       std::to_string(yen_k_paths.size()) + " itineraries found";
+    } else {
+      status_message = "✅ " + source_str + " ──▶ " + dest_str + " (" +
+                       target_date_str + ")  |  " +
+                       std::to_string(yen_k_paths.size()) + " itineraries found";
+    }
   }
 
   int get_external_dimy() const {
@@ -608,13 +633,74 @@ public:
     // 1. Text Inputs (Mouse Clickable, Single-line, Enter triggers search)
     InputOption src_opt;
     src_opt.multiline = false;
+    src_opt.placeholder = "e.g. New York, USA, JFK";
+    src_opt.on_change = [&] { update_suggestions(); };
     src_opt.on_enter = [&] { execute_search(show_research_mode); };
-    Component source_input = Input(&source_str, "DAC", src_opt);
+    Component source_input = Input(&source_str, "e.g. New York, JFK", src_opt);
 
     InputOption dst_opt;
     dst_opt.multiline = false;
+    dst_opt.placeholder = "e.g. Thailand, London, BKK";
+    dst_opt.on_change = [&] { update_suggestions(); };
     dst_opt.on_enter = [&] { execute_search(show_research_mode); };
-    Component dest_input = Input(&dest_str, "JFK", dst_opt);
+    Component dest_input = Input(&dest_str, "e.g. Thailand, BKK", dst_opt);
+
+    // 1b. Interactive Suggestion Buttons (Clickable options as you type)
+    std::vector<std::string> src_sugg_labels(MAX_SUGGESTIONS);
+    std::vector<std::string> dst_sugg_labels(MAX_SUGGESTIONS);
+    Components src_buttons;
+    Components dst_buttons;
+
+    auto make_sugg_opt = [](Color main_color) {
+      ButtonOption opt;
+      opt.transform = [main_color](const EntryState &s) {
+        auto el = text(s.label);
+        if (s.focused) {
+          return hbox({
+              text("[") | bold | color(Color::White),
+              el | bold | inverted | color(Color::White),
+              text("]") | bold | color(Color::White),
+          });
+        }
+        return hbox({
+            text("[") | dim | color(main_color),
+            el | color(main_color),
+            text("]") | dim | color(main_color),
+        });
+      };
+      return opt;
+    };
+
+    for (size_t i = 0; i < MAX_SUGGESTIONS; ++i) {
+      auto btn_src = Button(
+          &src_sugg_labels[i],
+          [&, i] {
+            if (i < src_matches.size()) {
+              source_str = src_matches[i].iata;
+              update_suggestions();
+              execute_search(show_research_mode);
+            }
+          },
+          make_sugg_opt(Color::CyanLight));
+      src_buttons.push_back(
+          Maybe(btn_src, [&, i] { return i < src_matches.size(); }));
+
+      auto btn_dst = Button(
+          &dst_sugg_labels[i],
+          [&, i] {
+            if (i < dst_matches.size()) {
+              dest_str = dst_matches[i].iata;
+              update_suggestions();
+              execute_search(show_research_mode);
+            }
+          },
+          make_sugg_opt(Color::YellowLight));
+      dst_buttons.push_back(
+          Maybe(btn_dst, [&, i] { return i < dst_matches.size(); }));
+    }
+
+    auto src_sugg_container = Container::Horizontal(src_buttons);
+    auto dst_sugg_container = Container::Horizontal(dst_buttons);
 
     // 2. Date Tool Components (Dropdowns)
     Component year_dropdown = Dropdown(&year_entries, &year_idx);
@@ -688,9 +774,11 @@ public:
     auto controls_container = Container::Vertical({
         Container::Horizontal({
             source_input,
-            dest_input,
             search_btn,
         }),
+        src_sugg_container,
+        dest_input,
+        dst_sugg_container,
         Container::Horizontal({
             year_dropdown,
             month_dropdown,
@@ -707,30 +795,72 @@ public:
         jump_research_btn,
     });
 
+    int main_focus_idx = 1; // Start with focus on search controls
     auto main_container = Container::Vertical({
         top_header_buttons,
         controls_container,
         footer_controls,
-    });
+    }, &main_focus_idx);
 
     // Renderer lambda
     auto renderer = Renderer(main_container, [&] {
       // Keep date synced live whenever dropdown changes
       update_target_date_from_tool();
 
-      std::string upper_src = to_upper_trimmed(source_str);
-      std::string upper_dst = to_upper_trimmed(dest_str);
+      // Update suggestion labels for any matches
+      for (size_t i = 0; i < MAX_SUGGESTIONS; ++i) {
+        if (i < src_matches.size()) {
+          const auto &m = src_matches[i];
+          std::string city_label = m.city.empty() ? m.name : m.city;
+          if (city_label.size() > 11)
+            city_label = city_label.substr(0, 10) + "…";
+          src_sugg_labels[i] = " ✈ " + m.iata + " · " + city_label + " ";
+        } else {
+          src_sugg_labels[i] = "";
+        }
 
-      std::string origin_desc =
-          (loader.iata_to_id.count(upper_src))
-              ? loader.ui_nodes[loader.iata_to_id[upper_src]].city + " (" +
-                    upper_src + ")"
-              : "Unknown IATA";
-      std::string dest_desc =
-          (loader.iata_to_id.count(upper_dst))
-              ? loader.ui_nodes[loader.iata_to_id[upper_dst]].city + " (" +
-                    upper_dst + ")"
-              : "Unknown IATA";
+        if (i < dst_matches.size()) {
+          const auto &m = dst_matches[i];
+          std::string city_label = m.city.empty() ? m.name : m.city;
+          if (city_label.size() > 11)
+            city_label = city_label.substr(0, 10) + "…";
+          dst_sugg_labels[i] = " ✈ " + m.iata + " · " + city_label + " ";
+        } else {
+          dst_sugg_labels[i] = "";
+        }
+      }
+
+      // Live resolution preview next to input boxes
+      std::string live_src_code =
+          AirportSearch::resolve_airport_code(source_str, loader);
+      std::string live_dst_code =
+          AirportSearch::resolve_airport_code(dest_str, loader);
+
+      std::string origin_desc;
+      bool origin_valid = false;
+      if (!live_src_code.empty() && loader.iata_to_id.count(live_src_code)) {
+        uint32_t id = loader.iata_to_id.at(live_src_code);
+        const auto &apt = loader.ui_nodes[id];
+        origin_desc = "➔ " + live_src_code + " (" + apt.city + ")";
+        origin_valid = true;
+      } else if (!source_str.empty()) {
+        origin_desc = "⚠️ Not found";
+      } else {
+        origin_desc = "Type city, country or code";
+      }
+
+      std::string dest_desc;
+      bool dest_valid = false;
+      if (!live_dst_code.empty() && loader.iata_to_id.count(live_dst_code)) {
+        uint32_t id = loader.iata_to_id.at(live_dst_code);
+        const auto &apt = loader.ui_nodes[id];
+        dest_desc = "➔ " + live_dst_code + " (" + apt.city + ")";
+        dest_valid = true;
+      } else if (!dest_str.empty()) {
+        dest_desc = "⚠️ Not found";
+      } else {
+        dest_desc = "Type city, country or code";
+      }
 
       // ---------------------------------------------------------------------
       // FIXED TOP BAR (BRANDING + TOP-RIGHT RESEARCH MODE BUTTON + EXIT)
@@ -758,38 +888,77 @@ public:
       // ---------------------------------------------------------------------
       // FIXED COMPACT SEARCH, DATE TOOL & FLIGHT PREFERENCE FORM
       // ---------------------------------------------------------------------
+      std::vector<Element> form_lines;
+
+      // Row 1: Origin Input, live resolution, and Search button
+      form_lines.push_back(hbox({
+          text(" Origin: ") | bold | vcenter,
+          source_input->Render() | size(WIDTH, EQUAL, 20) |
+              color(Color::White) | borderLight,
+          text(" " + origin_desc) |
+              color(origin_valid ? Color::GreenLight : Color::YellowLight) |
+              vcenter,
+          filler(),
+          search_btn->Render() | bold | color(Color::GreenLight),
+      }));
+
+      // Row 2: Live Origin suggestions (as user types)
+      if (!src_matches.empty()) {
+        std::vector<Element> s_items;
+        s_items.push_back(text("  ↳ Origin options: ") |
+                          color(Color::CyanLight) | dim | vcenter);
+        for (size_t i = 0; i < MAX_SUGGESTIONS; ++i) {
+          if (i < src_matches.size()) {
+            s_items.push_back(src_buttons[i]->Render());
+            s_items.push_back(text(" "));
+          }
+        }
+        form_lines.push_back(hbox(std::move(s_items)));
+      }
+
+      // Row 3: Destination Input, live resolution
+      form_lines.push_back(hbox({
+          text(" Dest:   ") | bold | vcenter,
+          dest_input->Render() | size(WIDTH, EQUAL, 20) | color(Color::White) |
+              borderLight,
+          text(" " + dest_desc) |
+              color(dest_valid ? Color::GreenLight : Color::YellowLight) |
+              vcenter,
+          filler(),
+      }));
+
+      // Row 4: Live Dest suggestions (as user types)
+      if (!dst_matches.empty()) {
+        std::vector<Element> d_items;
+        d_items.push_back(text("  ↳ Dest options:   ") |
+                          color(Color::YellowLight) | dim | vcenter);
+        for (size_t i = 0; i < MAX_SUGGESTIONS; ++i) {
+          if (i < dst_matches.size()) {
+            d_items.push_back(dst_buttons[i]->Render());
+            d_items.push_back(text(" "));
+          }
+        }
+        form_lines.push_back(hbox(std::move(d_items)));
+      }
+
+      // Row 5: Date Tool, Flight Preference Picker, Status Message
+      form_lines.push_back(hbox({
+          text(" Date: ") | bold | vcenter,
+          year_dropdown->Render() | size(WIDTH, EQUAL, 9),
+          text(" "),
+          month_dropdown->Render() | size(WIDTH, EQUAL, 13),
+          text(" "),
+          day_dropdown->Render() | size(WIDTH, EQUAL, 7),
+          text("   View: ") | bold | color(Color::YellowLight) | vcenter,
+          preference_toggle->Render() | color(Color::White) | vcenter,
+          filler(),
+          text(status_message + " ") | vcenter |
+              (has_results ? color(Color::Green) : color(Color::RedLight)),
+      }));
+
       auto form_window = window(
           text(" SEARCH & FLIGHT PREFERENCES ") | bold | color(Color::CyanLight),
-          vbox({
-              hbox({
-                  text(" Origin: ") | bold,
-                  source_input->Render() | size(WIDTH, EQUAL, 7) |
-                      color(Color::White) | borderLight,
-                  text(" " + origin_desc) | color(Color::GreenLight) |
-                      vcenter,
-                  text("   "),
-                  text("Dest: ") | bold | vcenter,
-                  dest_input->Render() | size(WIDTH, EQUAL, 7) |
-                      color(Color::White) | borderLight,
-                  text(" " + dest_desc) | color(Color::GreenLight) | vcenter,
-                  filler(),
-                  search_btn->Render() | bold | color(Color::GreenLight),
-              }),
-              hbox({
-                  text(" Date: ") | bold | vcenter,
-                  year_dropdown->Render() | size(WIDTH, EQUAL, 9),
-                  text(" "),
-                  month_dropdown->Render() | size(WIDTH, EQUAL, 13),
-                  text(" "),
-                  day_dropdown->Render() | size(WIDTH, EQUAL, 7),
-                  text("   View: ") | bold | color(Color::YellowLight) | vcenter,
-                  preference_toggle->Render() | color(Color::White) | vcenter,
-                  filler(),
-                  text(status_message + " ") | vcenter |
-                      (has_results ? color(Color::Green)
-                                   : color(Color::RedLight)),
-              }),
-          })) |
+          vbox(std::move(form_lines))) |
           color(Color::Cyan);
 
       // ---------------------------------------------------------------------

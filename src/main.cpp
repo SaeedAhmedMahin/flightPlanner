@@ -13,6 +13,7 @@
 #include "Algorithms/TwoPhaseRouter.hpp"
 #include "Algorithms/Yen.hpp"
 #include "DataLoader.hpp"
+#include "DataStructures/AirportSearch.hpp"
 #include "TUI/InteractiveApp.hpp"
 #include "TUI/TUIViews.hpp"
 #include <chrono>
@@ -250,11 +251,25 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (loader.iata_to_id.find(source_iata) == loader.iata_to_id.end() ||
-      loader.iata_to_id.find(dest_iata) == loader.iata_to_id.end()) {
-    std::cerr << "Error: Unknown airport code(s).\n";
+  std::string resolved_src = AirportSearch::resolve_airport_code(source_iata, loader);
+  std::string resolved_dst = AirportSearch::resolve_airport_code(dest_iata, loader);
+
+  if (resolved_src.empty() || loader.iata_to_id.find(resolved_src) == loader.iata_to_id.end() ||
+      resolved_dst.empty() || loader.iata_to_id.find(resolved_dst) == loader.iata_to_id.end()) {
+    std::cerr << "Error: Unknown airport code(s) or city/country not found ('"
+              << source_iata << "', '" << dest_iata << "').\n";
     return 1;
   }
+
+  if (resolved_src != source_iata || resolved_dst != dest_iata) {
+    std::cout << "Resolved: '" << source_iata << "' -> " << resolved_src << " ("
+              << loader.ui_nodes[loader.iata_to_id[resolved_src]].city << "), '"
+              << dest_iata << "' -> " << resolved_dst << " ("
+              << loader.ui_nodes[loader.iata_to_id[resolved_dst]].city << ")\n";
+  }
+
+  source_iata = resolved_src;
+  dest_iata = resolved_dst;
 
   uint32_t source_id = loader.iata_to_id[source_iata];
   uint32_t dest_id = loader.iata_to_id[dest_iata];
