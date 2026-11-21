@@ -44,6 +44,7 @@
 - [x] Separate User Version and Researcher Version
      - [x] Add Filtering using airlines, transits, time range, price range etc (natural typed text input e.g. "non-stop", "under $800", "Emirates", "morning", "< 24h" + clickable quick chips)
      - [x] Also make sure We can search by just named Bangkok or even bang and we get the options automatically including DMK and BKK
+     - [x] Clickable Flight Options & Dedicated Detailed Flight View Space (mouse & button selection for all options, live card updates with leg breakdowns, times, transits, and fares)
 
 ## 5. Research & Benchmarking
 - [ ] C++ Profiler (Track microsecond CPU time & nodes expanded)

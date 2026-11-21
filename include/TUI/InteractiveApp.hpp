@@ -71,6 +71,11 @@ public:
 
   // Flight Picker Preference (0: Best Recommended, 1: Cheapest, 2: Fastest)
   int selected_preference = 0;
+  int last_preference = 0;
+  int selected_flight_idx = 0;
+  std::vector<ftxui::Box> option_boxes;
+  ftxui::Box cheapest_summary_box;
+  ftxui::Box fastest_summary_box;
   std::vector<std::string> preference_entries = {
       " ⭐ Best Value ", " 🏷️  Cheapest ", " ⚡ Fastest "};
 
@@ -203,12 +208,44 @@ public:
           yen_alternatives.push_back(res);
         }
       }
+
+      // Keep selected_flight_idx within valid range
+      if (selected_flight_idx < 0 ||
+          selected_flight_idx >= static_cast<int>(filtered_itineraries.size())) {
+        sync_selected_flight_from_preference();
+      }
     } else {
       cheapest_flight = RoutingResult{false, 0, 0, {}, {}};
       fastest_flight = RoutingResult{false, 0, 0, {}, {}};
       best_flight = RoutingResult{false, 0, 0, {}, {}};
       yen_alternatives.clear();
+      selected_flight_idx = -1;
     }
+  }
+
+  void sync_selected_flight_from_preference() {
+    if (filtered_itineraries.empty()) {
+      selected_flight_idx = -1;
+      return;
+    }
+    std::string target_key;
+    if (selected_preference == 0 && best_flight.success) {
+      target_key = serialize_path_key(best_flight.path);
+    } else if (selected_preference == 1 && cheapest_flight.success) {
+      target_key = serialize_path_key(cheapest_flight.path);
+    } else if (selected_preference == 2 && fastest_flight.success) {
+      target_key = serialize_path_key(fastest_flight.path);
+    }
+
+    if (!target_key.empty()) {
+      for (size_t i = 0; i < filtered_itineraries.size(); ++i) {
+        if (serialize_path_key(filtered_itineraries[i].path) == target_key) {
+          selected_flight_idx = static_cast<int>(i);
+          return;
+        }
+      }
+    }
+    selected_flight_idx = 0;
   }
 
   void reset_filters() {
@@ -809,6 +846,7 @@ public:
 
     // Apply active filters to candidate pool
     apply_filters();
+    sync_selected_flight_from_preference();
 
     has_results = !all_candidates.empty();
     scroll_line = 0;
@@ -1036,6 +1074,24 @@ public:
         quick_chips_container,
     });
 
+    // 3c. Interactive Flight Option Buttons Pool (Clickable options)
+    constexpr static size_t MAX_OPTION_BUTTONS = 40;
+    std::vector<std::string> opt_btn_labels(MAX_OPTION_BUTTONS);
+    Components opt_buttons;
+    for (size_t i = 0; i < MAX_OPTION_BUTTONS; ++i) {
+      auto btn = Button(
+          &opt_btn_labels[i],
+          [&, i] {
+            if (i < filtered_itineraries.size()) {
+              selected_flight_idx = static_cast<int>(i);
+            }
+          },
+          ButtonOption::Ascii());
+      opt_buttons.push_back(
+          Maybe(btn, [&, i] { return i < filtered_itineraries.size(); }));
+    }
+    auto opt_buttons_container = Container::Vertical(opt_buttons);
+
     // Assemble interactive component hierarchy
     auto top_header_buttons = Container::Horizontal({
         research_toggle_btn,
@@ -1057,6 +1113,7 @@ public:
             preference_toggle,
         }),
         filters_container,
+        opt_buttons_container,
     });
 
     auto footer_controls = Container::Horizontal({
@@ -1079,8 +1136,27 @@ public:
       // Keep date synced live whenever dropdown changes
       update_target_date_from_tool();
 
-      // Keep filters synced live whenever any filter dropdown changes
+      // If preference changed from toggle
+      if (selected_preference != last_preference) {
+        last_preference = selected_preference;
+        sync_selected_flight_from_preference();
+      }
+
+      // Keep filters synced live
       apply_filters();
+
+      // Update option button labels
+      for (size_t i = 0; i < MAX_OPTION_BUTTONS; ++i) {
+        if (i < filtered_itineraries.size()) {
+          if (static_cast<int>(i) == selected_flight_idx) {
+            opt_btn_labels[i] = " ▶ [✓ Selected] ";
+          } else {
+            opt_btn_labels[i] = "   [Inspect]    ";
+          }
+        } else {
+          opt_btn_labels[i] = "";
+        }
+      }
 
       // Update suggestion labels for any matches
       for (size_t i = 0; i < MAX_SUGGESTIONS; ++i) {
@@ -1342,147 +1418,263 @@ public:
       std::vector<Element> research_elements;
 
       if (has_results) {
-        // Active chosen flight based on preference picker
-        RoutingResult chosen_flight;
-        std::string chosen_title;
-        std::string chosen_reason;
-        Color chosen_color;
+        if (!filtered_itineraries.empty()) {
+          std::string best_key = serialize_path_key(best_flight.path);
+          std::string cheap_key = serialize_path_key(cheapest_flight.path);
+          std::string fast_key = serialize_path_key(fastest_flight.path);
 
-        if (selected_preference == 0) {
-          chosen_flight = best_flight;
-          chosen_title = "⭐ RECOMMENDED BEST FLIGHT (OPTIMAL BALANCE)";
-          chosen_reason = best_reason;
-          chosen_color = Color::GreenLight;
-        } else if (selected_preference == 1) {
-          chosen_flight = cheapest_flight;
-          chosen_title = "🏷️  CHEAPEST FLIGHT ITINERARY";
-          chosen_reason = "Lowest ticket fare path available on the network.";
-          chosen_color = Color::YellowLight;
-        } else {
-          chosen_flight = fastest_flight;
-          chosen_title = "⚡ FASTEST FLIGHT ITINERARY";
-          chosen_reason = "Absolute minimum elapsed travel duration path.";
-          chosen_color = Color::MagentaLight;
-        }
+          // 1. Dedicated Selected Flight Details Space (Immediately visible!)
+          RoutingResult chosen_flight;
+          if (selected_flight_idx >= 0 &&
+              selected_flight_idx < (int)filtered_itineraries.size()) {
+            chosen_flight = filtered_itineraries[selected_flight_idx];
+          }
 
-        // Selected Flight Card
-        if (chosen_flight.success) {
-          customer_elements.push_back(TUIViews::build_itinerary_card(
-              chosen_title, chosen_flight, chosen_reason, loader,
-              active_source_id, chosen_color, chosen_color, true));
-        } else {
-          customer_elements.push_back(
-              window(
-                  text(" ⚠️  NO FLIGHTS MATCH CURRENT FILTERS ") | bold |
-                      color(Color::YellowLight),
-                  vbox({
-                      text(" None of the " +
-                           std::to_string(all_candidates.size()) +
-                           " available itineraries match your active filter criteria:") |
-                          color(Color::White),
-                      text("   • " + get_active_filters_description()) |
-                          color(Color::YellowLight) | bold,
-                      text(" "),
-                      text(" Tip: Click [ ↺ Reset Filters ] on the filters bar "
-                           "above or relax your stops/price criteria.") |
-                          color(Color::GrayLight),
-                  })) |
-              color(Color::YellowLight));
-        }
+          if (chosen_flight.success) {
+            std::string chosen_title;
+            std::string chosen_reason;
+            Color chosen_color;
 
-        // Summary Comparison Cards
-        std::vector<Element> summary_cards;
-        if (cheapest_flight.success) {
-          summary_cards.push_back(
-              window(
-                  text(" 🏷️  CHEAPEST ITINERARY ") | bold | color(Color::Yellow),
-                  vbox({
-                      hbox({
-                          text(" Fare: ") | bold,
-                          text("$" + std::to_string(cheapest_flight.total_price)) |
-                              bold | color(Color::Yellow),
-                          text("  │  Duration: ") | bold,
-                          text(TUIViews::format_duration(
-                              cheapest_flight.total_time_mins)) |
-                              color(Color::CyanLight),
-                          text("  │  Stops: ") | bold,
-                          text(std::to_string(cheapest_flight.path.size() - 1)) |
-                              color(Color::White),
-                      }),
-                      separatorLight(),
-                      text(" Route: " + TUIViews::build_route_summary(
-                                            cheapest_flight, loader,
-                                            active_source_id)) |
-                          color(Color::GrayLight),
-                  })) |
-              color(Color::Yellow) | flex);
-        }
+            std::string pkey = serialize_path_key(chosen_flight.path);
+            if (selected_preference == 1 && pkey == cheap_key) {
+              chosen_title = "🏷️  CHEAPEST FLIGHT ITINERARY (OPTION #" +
+                             std::to_string(selected_flight_idx + 1) +
+                             " SELECTED)";
+              chosen_reason = "Lowest ticket fare available on the network.";
+              chosen_color = Color::YellowLight;
+            } else if (selected_preference == 2 && pkey == fast_key) {
+              chosen_title = "⚡ FASTEST FLIGHT ITINERARY (OPTION #" +
+                             std::to_string(selected_flight_idx + 1) +
+                             " SELECTED)";
+              chosen_reason = "Absolute minimum elapsed travel duration.";
+              chosen_color = Color::MagentaLight;
+            } else if (pkey == best_key) {
+              chosen_title = "⭐ RECOMMENDED BEST FLIGHT (OPTION #" +
+                             std::to_string(selected_flight_idx + 1) +
+                             " SELECTED)";
+              chosen_reason = best_reason;
+              chosen_color = Color::GreenLight;
+            } else if (pkey == cheap_key) {
+              chosen_title = "🏷️  CHEAPEST FLIGHT ITINERARY (OPTION #" +
+                             std::to_string(selected_flight_idx + 1) +
+                             " SELECTED)";
+              chosen_reason = "Lowest ticket fare available on the network.";
+              chosen_color = Color::YellowLight;
+            } else if (pkey == fast_key) {
+              chosen_title = "⚡ FASTEST FLIGHT ITINERARY (OPTION #" +
+                             std::to_string(selected_flight_idx + 1) +
+                             " SELECTED)";
+              chosen_reason = "Absolute minimum elapsed travel duration.";
+              chosen_color = Color::MagentaLight;
+            } else {
+              chosen_title = "✈ SELECTED FLIGHT ITINERARY — OPTION #" +
+                             std::to_string(selected_flight_idx + 1) + " OF " +
+                             std::to_string(filtered_itineraries.size());
+              chosen_reason = "Selected custom flight choice. Full leg-by-leg "
+                              "schedule breakdown below.";
+              chosen_color = Color::CyanLight;
+            }
 
-        if (fastest_flight.success) {
-          summary_cards.push_back(
-              window(
-                  text(" ⚡ FASTEST ITINERARY ") | bold |
-                      color(Color::MagentaLight),
-                  vbox({
-                      hbox({
-                          text(" Fare: ") | bold,
-                          text("$" + std::to_string(fastest_flight.total_price)) |
-                              bold | color(Color::Yellow),
-                          text("  │  Duration: ") | bold,
-                          text(TUIViews::format_duration(
-                              fastest_flight.total_time_mins)) |
-                              bold | color(Color::MagentaLight),
-                          text("  │  Stops: ") | bold,
-                          text(std::to_string(fastest_flight.path.size() - 1)) |
-                              color(Color::White),
-                      }),
-                      separatorLight(),
-                      text(" Route: " + TUIViews::build_route_summary(
-                                            fastest_flight, loader,
-                                            active_source_id)) |
-                          color(Color::GrayLight),
-                  })) |
-              color(Color::MagentaLight) | flex);
-        }
+            customer_elements.push_back(TUIViews::build_itinerary_card(
+                chosen_title, chosen_flight, chosen_reason, loader,
+                active_source_id, chosen_color, chosen_color, true));
+          }
 
-        if (!summary_cards.empty()) {
-          customer_elements.push_back(hbox(std::move(summary_cards)));
-        }
+          // 2. Quick Summary Comparison Cards (Cheapest & Fastest)
+          std::vector<Element> summary_cards;
+          if (cheapest_flight.success) {
+            summary_cards.push_back(
+                window(
+                    hbox({
+                        text(" 🏷️  CHEAPEST ITINERARY ") | bold |
+                            color(Color::Yellow),
+                        filler(),
+                        text("[Click to Inspect]") | dim |
+                            color(Color::YellowLight),
+                    }),
+                    vbox({
+                        hbox({
+                            text(" Fare: ") | bold,
+                            text("$" +
+                                 std::to_string(cheapest_flight.total_price)) |
+                                bold | color(Color::Yellow),
+                            text("  │  Duration: ") | bold,
+                            text(TUIViews::format_duration(
+                                cheapest_flight.total_time_mins)) |
+                                color(Color::CyanLight),
+                            text("  │  Stops: ") | bold,
+                            text(std::to_string(cheapest_flight.path.size() -
+                                                1)) |
+                                color(Color::White),
+                        }),
+                        separatorLight(),
+                        text(" Route: " + TUIViews::build_route_summary(
+                                              cheapest_flight, loader,
+                                              active_source_id)) |
+                            color(Color::GrayLight),
+                    })) |
+                color(Color::Yellow) | flex | reflect(cheapest_summary_box));
+          }
 
-        // Alternative Itineraries Box
-        if (!yen_alternatives.empty()) {
-          std::vector<Element> alt_rows;
-          for (size_t i = 0; i < yen_alternatives.size(); ++i) {
-            const auto &alt = yen_alternatives[i];
-            if (!alt.success)
-              continue;
+          if (fastest_flight.success) {
+            summary_cards.push_back(
+                window(
+                    hbox({
+                        text(" ⚡ FASTEST ITINERARY ") | bold |
+                            color(Color::MagentaLight),
+                        filler(),
+                        text("[Click to Inspect]") | dim |
+                            color(Color::MagentaLight),
+                    }),
+                    vbox({
+                        hbox({
+                            text(" Fare: ") | bold,
+                            text("$" +
+                                 std::to_string(fastest_flight.total_price)) |
+                                bold | color(Color::Yellow),
+                            text("  │  Duration: ") | bold,
+                            text(TUIViews::format_duration(
+                                fastest_flight.total_time_mins)) |
+                                bold | color(Color::MagentaLight),
+                            text("  │  Stops: ") | bold,
+                            text(std::to_string(fastest_flight.path.size() -
+                                                1)) |
+                                color(Color::White),
+                        }),
+                        separatorLight(),
+                        text(" Route: " + TUIViews::build_route_summary(
+                                              fastest_flight, loader,
+                                              active_source_id)) |
+                            color(Color::GrayLight),
+                    })) |
+                color(Color::MagentaLight) | flex |
+                reflect(fastest_summary_box));
+          }
+
+          if (!summary_cards.empty()) {
+            customer_elements.push_back(hbox(std::move(summary_cards)));
+          }
+
+          // 3. Clickable Flight Options List Window
+          std::vector<Element> option_rows;
+          if (option_boxes.size() < filtered_itineraries.size()) {
+            option_boxes.resize(filtered_itineraries.size());
+          }
+
+          for (size_t i = 0; i < filtered_itineraries.size(); ++i) {
+            const auto &res = filtered_itineraries[i];
+            bool is_selected = (static_cast<int>(i) == selected_flight_idx);
+            std::string pkey = serialize_path_key(res.path);
+
+            std::string badge_text;
+            Color badge_color = Color::White;
+            if (pkey == best_key) {
+              badge_text = " ⭐ Best Value ";
+              badge_color = Color::GreenLight;
+            } else if (pkey == cheap_key) {
+              badge_text = " 🏷️ Cheapest   ";
+              badge_color = Color::YellowLight;
+            } else if (pkey == fast_key) {
+              badge_text = " ⚡ Fastest    ";
+              badge_color = Color::MagentaLight;
+            } else {
+              badge_text = " Option #" + std::to_string(i + 1) + "     ";
+              badge_color = Color::CyanLight;
+            }
+
             std::string stops_str =
-                (alt.path.size() <= 1)
-                    ? "Non-stop"
-                    : (std::to_string(alt.path.size() - 1) +
-                       (alt.path.size() == 2 ? " Stop" : " Stops"));
-            alt_rows.push_back(hbox({
-                text(" Option #" + std::to_string(i + 1) + ": ") | bold |
-                    color(Color::White),
-                text("$" + std::to_string(alt.total_price)) | bold |
-                    color(Color::Yellow),
+                (res.path.size() <= 1)
+                    ? "Direct"
+                    : (std::to_string(res.path.size() - 1) +
+                       (res.path.size() == 2 ? " Stop " : " Stops"));
+
+            std::string route_str =
+                TUIViews::build_route_summary(res, loader, active_source_id);
+
+            std::string airlines_str;
+            std::set<std::string> leg_airlines;
+            for (const auto &f : res.path) {
+              if (f.flight_details_id < loader.ui_flights.size()) {
+                leg_airlines.insert(
+                    loader.ui_flights[f.flight_details_id].airline_code);
+              }
+            }
+            for (const auto &code : leg_airlines) {
+              if (!airlines_str.empty())
+                airlines_str += "/";
+              airlines_str += code;
+            }
+            if (!airlines_str.empty()) {
+              airlines_str = " (" + airlines_str + ")";
+            }
+
+            auto row_content = hbox({
+                opt_buttons[i]->Render() |
+                    (is_selected ? (bold | color(Color::GreenLight))
+                                 : color(Color::CyanLight)),
+                text(" "),
+                text(badge_text) | bold | color(badge_color),
                 text("  │  ") | dim,
-                text(TUIViews::format_duration(alt.total_time_mins)) |
-                    color(Color::CyanLight),
+                text("$" + std::to_string(res.total_price)) | bold |
+                    (is_selected ? color(Color::YellowLight)
+                                 : color(Color::Yellow)),
                 text("  │  ") | dim,
-                text(stops_str) | color(Color::White),
+                text(TUIViews::format_duration(res.total_time_mins)) | bold |
+                    (is_selected ? color(Color::CyanLight) : color(Color::Cyan)),
                 text("  │  ") | dim,
-                text(TUIViews::build_route_summary(alt, loader,
-                                                   active_source_id)) |
-                    color(Color::GrayLight),
-            }));
+                text(stops_str) |
+                    (is_selected ? (bold | color(Color::White))
+                                 : color(Color::GrayLight)),
+                text("  │  ") | dim,
+                text(route_str + airlines_str) |
+                    (is_selected ? (bold | color(Color::White))
+                                 : color(Color::GrayLight)),
+                filler(),
+            });
+
+            Element decorated_row;
+            if (is_selected) {
+              decorated_row = row_content | bgcolor(Color::RGB(15, 35, 45)) |
+                              reflect(option_boxes[i]);
+            } else {
+              decorated_row = row_content | reflect(option_boxes[i]);
+            }
+
+            option_rows.push_back(decorated_row);
+            if (i + 1 < filtered_itineraries.size()) {
+              option_rows.push_back(separatorLight());
+            }
           }
 
           customer_elements.push_back(
-              window(text(" Additional Flight Choices ") | bold |
-                         color(Color::CyanLight),
-                     vbox(std::move(alt_rows))) |
-              color(Color::GrayLight));
+              window(
+                  hbox({
+                      text(" ✈ ALL FLIGHT OPTIONS (" +
+                           std::to_string(filtered_itineraries.size()) +
+                           " Available — Click any option to view full details) ") |
+                          bold | color(Color::CyanLight),
+                      filler(),
+                      text(" Click any option to inspect ") | dim,
+                  }),
+                  vbox(std::move(option_rows))) |
+              color(Color::Cyan));
+        } else {
+        customer_elements.push_back(
+            window(
+                text(" ⚠️  NO FLIGHTS MATCH CURRENT FILTERS ") | bold |
+                    color(Color::YellowLight),
+                vbox({
+                    text(" None of the " +
+                         std::to_string(all_candidates.size()) +
+                         " available itineraries match your active filter criteria:") |
+                        color(Color::White),
+                    text("   • " + get_active_filters_description()) |
+                        color(Color::YellowLight) | bold,
+                    text(" "),
+                    text(" Tip: Click [ ↺ Clear ] on the filter bar above or edit your needs.") |
+                        color(Color::GrayLight),
+                })) |
+            color(Color::YellowLight));
         }
 
         // ===================================================================
@@ -1824,6 +2016,28 @@ public:
           scroll_line =
               int(std::clamp(frac, 0.0f, 1.0f) * float(get_max_scroll()));
           return true;
+        }
+
+        // Left click on summary comparison cards or any flight option row
+        if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+          if (cheapest_summary_box.Contain(m.x, m.y)) {
+            selected_preference = 1;
+            last_preference = 1;
+            sync_selected_flight_from_preference();
+            return true;
+          }
+          if (fastest_summary_box.Contain(m.x, m.y)) {
+            selected_preference = 2;
+            last_preference = 2;
+            sync_selected_flight_from_preference();
+            return true;
+          }
+          for (size_t i = 0; i < option_boxes.size() && i < filtered_itineraries.size(); ++i) {
+            if (option_boxes[i].Contain(m.x, m.y)) {
+              selected_flight_idx = static_cast<int>(i);
+              return true;
+            }
+          }
         }
       }
 
