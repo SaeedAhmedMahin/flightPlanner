@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DataLoader.hpp"
+#include "TUI/WorldMap.hpp"
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/dom/table.hpp>
 #include <ftxui/screen/screen.hpp>
@@ -171,6 +172,10 @@ public:
     std::vector<Element> main_layout;
     main_layout.push_back(header_box);
     main_layout.push_back(best_card);
+    if (best_recommendation.success) {
+      main_layout.push_back(FlightPlanner::TUI::WorldMap::build_route_map(
+          best_recommendation, loader, source_id));
+    }
     if (!summary_cards.empty()) {
       main_layout.push_back(hbox(std::move(summary_cards)));
     }
@@ -395,6 +400,8 @@ public:
     main_layout.push_back(gauge_box);
     if (yen_best.success) {
       main_layout.push_back(yen_box);
+      main_layout.push_back(FlightPlanner::TUI::WorldMap::build_route_map(
+          yen_best, loader, source_id));
     }
 
     auto document = vbox(std::move(main_layout));

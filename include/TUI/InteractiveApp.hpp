@@ -18,6 +18,7 @@
 #include "DataStructures/AirportSearch.hpp"
 #include "DataStructures/FilterParser.hpp"
 #include "TUI/TUIViews.hpp"
+#include "TUI/WorldMap.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -78,6 +79,10 @@ public:
   ftxui::Box fastest_summary_box;
   std::vector<std::string> preference_entries = {
       " ⭐ Best Value ", " 🏷️  Cheapest ", " ⚡ Fastest "};
+
+  // World Map Visualization State
+  bool show_world_map = true;
+  std::string world_map_btn_label = " 🗺️  World Map: ON ";
 
   // Typed Flight Needs & Filters State
   std::string typed_filter_str;
@@ -994,6 +999,15 @@ public:
     Component exit_btn =
         Button(" ❌ Exit ", [&] { screen.Exit(); }, ButtonOption::Border());
 
+    Component map_toggle_btn = Button(
+        &world_map_btn_label,
+        [&] {
+          show_world_map = !show_world_map;
+          world_map_btn_label = show_world_map ? " 🗺️  World Map: ON "
+                                               : " 🗺️  World Map: OFF ";
+        },
+        ButtonOption::Border());
+
     // 5. Bottom Scroll Control Buttons (Always Accessible!)
     Component scroll_top_btn = Button(
         " ⤒ Top ", [&] { scroll_line = 0; }, ButtonOption::Ascii());
@@ -1094,6 +1108,7 @@ public:
 
     // Assemble interactive component hierarchy
     auto top_header_buttons = Container::Horizontal({
+        map_toggle_btn,
         research_toggle_btn,
         exit_btn,
     });
@@ -1228,6 +1243,10 @@ public:
           }),
           filler(),
           hbox({
+              map_toggle_btn->Render() |
+                  (show_world_map ? color(Color::CyanLight)
+                                  : color(Color::GrayLight)),
+              text(" "),
               research_toggle_btn->Render() |
                   (show_research_mode ? color(Color::GreenLight)
                                       : color(Color::YellowLight)),
@@ -1478,6 +1497,12 @@ public:
             customer_elements.push_back(TUIViews::build_itinerary_card(
                 chosen_title, chosen_flight, chosen_reason, loader,
                 active_source_id, chosen_color, chosen_color, true));
+
+            if (show_world_map) {
+              customer_elements.push_back(
+                  FlightPlanner::TUI::WorldMap::build_route_map(
+                      chosen_flight, loader, active_source_id));
+            }
           }
 
           // 2. Quick Summary Comparison Cards (Cheapest & Fastest)
@@ -1762,7 +1787,14 @@ public:
                      ftx_table.Render() | hcenter) |
               color(Color::GreenLight));
 
-          // 2. Visual Speed Profiler Gauges
+          // 2. Geographic Route Trajectory on World Map
+          if (show_world_map && best_flight.success) {
+            research_elements.push_back(
+                FlightPlanner::TUI::WorldMap::build_route_map(
+                    best_flight, loader, active_source_id));
+          }
+
+          // 3. Visual Speed Profiler Gauges
           std::vector<Element> visual_gauges;
           for (const auto &bench : researcher_benchmarks) {
             float ratio = (max_time_us > 0)
@@ -1923,6 +1955,23 @@ public:
           research_elements.push_back(
               text(" ─── End of Research Report ─── ") | dim | hcenter);
         }
+      } else {
+        if (show_world_map && active_source_id != (uint32_t)-1 &&
+            active_dest_id != (uint32_t)-1) {
+          customer_elements.push_back(
+              FlightPlanner::TUI::WorldMap::build_preview_map(
+                  active_source_id, active_dest_id, loader));
+        }
+        customer_elements.push_back(
+            window(text(" NO ROUTES FOUND ") | bold | color(Color::RedLight),
+                   vbox({
+                       text(" No scheduled flight connections found for " +
+                            source_str + " ➔ " + dest_str + " on " + target_date_str) |
+                           color(Color::White),
+                       text(" Tip: Try adjusting the travel date or airport code.") |
+                           color(Color::GrayLight),
+                   })) |
+            color(Color::Red));
       }
 
       Element customer_block = vbox(std::move(customer_elements));
