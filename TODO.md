@@ -45,6 +45,15 @@
      - [x] Add Filtering using airlines, transits, time range, price range etc (natural typed text input e.g. "non-stop", "under $800", "Emirates", "morning", "< 24h" + clickable quick chips)
      - [x] Also make sure We can search by just named Bangkok or even bang and we get the options automatically including DMK and BKK
      - [x] Clickable Flight Options & Dedicated Detailed Flight View Space (mouse & button selection for all options, live card updates with leg breakdowns, times, transits, and fares)
+     - [x] Google Flights UI Overhaul:
+         - [x] Modern Google Flights search capsule layout with clean horizontal inputs
+         - [x] Support 3 Trip Types: Round-trip (`⇄ Round trip`), One-way (`➔ One-way`), and Multi-city (`🔀 Multi-city`)
+         - [x] Swap button (`[ ⇄ ]`) to instantly reverse origin and destination
+         - [x] Single Date Button(s) replacing separate year/month/day dropdowns
+         - [x] Interactive Calendar Picker Modal (`CalendarPicker.hpp`) with 7-column day grid, month/year navigation, and date confirmation
+         - [x] Round-trip Outbound + Return leg selection tabs with combined total fare computation
+         - [x] Multi-city dynamic flight segments with leg selection tabs and combined total fare computation
+         - [x] Great Circle World Map trajectory integration across all itineraries
 
 ## 5. Research & Benchmarking
 - [ ] C++ Profiler (Track microsecond CPU time & nodes expanded)

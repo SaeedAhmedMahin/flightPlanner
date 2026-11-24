@@ -17,6 +17,7 @@
 #include "DataLoader.hpp"
 #include "DataStructures/AirportSearch.hpp"
 #include "DataStructures/FilterParser.hpp"
+#include "TUI/CalendarPicker.hpp"
 #include "TUI/TUIViews.hpp"
 #include "TUI/WorldMap.hpp"
 
@@ -43,7 +44,14 @@ class InteractiveApp {
 public:
   DataLoader &loader;
 
-  // Search parameters
+  // Trip Types
+  enum class TripType { ROUND_TRIP = 0, ONE_WAY = 1, MULTI_CITY = 2 };
+  int selected_trip_type = 0; // Default: Round trip (0: Round trip, 1: One-way, 2: Multi-city)
+  int last_trip_type = 0;
+  std::vector<std::string> trip_type_entries = {
+      " ⇄ Round trip ", " ➔ One-way ", " 🔀 Multi-city "};
+
+  // Search parameters (One-way / Round-trip primary)
   std::string source_str;
   std::string dest_str;
   std::string target_date_str;
@@ -54,31 +62,223 @@ public:
   constexpr static size_t MAX_SUGGESTIONS = 4;
 
   void update_suggestions() {
-    src_matches = AirportSearch::search_airports(source_str, loader, MAX_SUGGESTIONS);
-    dst_matches = AirportSearch::search_airports(dest_str, loader, MAX_SUGGESTIONS);
+    src_matches =
+        AirportSearch::search_airports(source_str, loader, MAX_SUGGESTIONS);
+    dst_matches =
+        AirportSearch::search_airports(dest_str, loader, MAX_SUGGESTIONS);
   }
 
-  // Date Tool State
-  int year_idx = 0;
-  std::vector<std::string> year_entries = {"2026", "2027"};
+  // Calendar Picker Integration
+  FlightPlanner::TUI::CalendarPicker calendar_picker;
+  std::string dep_date_str = "2026-11-15";
+  std::string ret_date_str = "2026-11-22";
+  std::string dep_date_btn_label = " 🛫 Dep: Sun, Nov 15 ";
+  std::string ret_date_btn_label = " 🛬 Ret: Sun, Nov 22 ";
 
-  int month_idx = 10; // 11 - Nov (0-indexed: 10)
-  std::vector<std::string> month_entries = {
-      "01 - Jan", "02 - Feb", "03 - Mar", "04 - Apr", "05 - May", "06 - Jun",
-      "07 - Jul", "08 - Aug", "09 - Sep", "10 - Oct", "11 - Nov", "12 - Dec"};
+  void update_date_btn_labels() {
+    if (selected_trip_type == 1) { // One-way
+      dep_date_btn_label =
+          " 📅 " +
+          FlightPlanner::TUI::CalendarPicker::format_iso_to_short(dep_date_str) +
+          " ";
+    } else {
+      dep_date_btn_label =
+          " 🛫 Dep: " +
+          FlightPlanner::TUI::CalendarPicker::format_iso_to_short(dep_date_str) +
+          " ";
+      ret_date_btn_label =
+          " 🛬 Ret: " +
+          FlightPlanner::TUI::CalendarPicker::format_iso_to_short(ret_date_str) +
+          " ";
+    }
+  }
 
-  int day_idx = 14; // 15th (0-indexed: 14)
-  std::vector<std::string> day_entries;
+  // Dynamic Mouse Cursor Management (OSC 22: "text", "pointer", "default")
+  std::string current_mouse_cursor;
+  void set_mouse_cursor(const std::string &shape) {
+    if (shape == current_mouse_cursor)
+      return;
+    current_mouse_cursor = shape;
+    if (shape.empty()) {
+      std::cout << "\033]22;\033\\" << std::flush;
+    } else {
+      std::cout << "\033]22;" << shape << "\033\\" << std::flush;
+    }
+  }
+
+  // Multi-city Leg Representation (up to 4 segments)
+  struct MultiCityLeg {
+    std::string origin;
+    std::string dest;
+    std::string date_str;
+    std::string date_btn_label;
+    uint32_t src_id = 0;
+    uint32_t dst_id = 0;
+    std::vector<AirportSearch::AirportMatch> src_matches;
+    std::vector<AirportSearch::AirportMatch> dst_matches;
+    std::vector<RoutingResult> candidates;
+    std::vector<RoutingResult> filtered;
+    int selected_idx = 0;
+  };
+  std::vector<MultiCityLeg> multi_city_legs;
+  int active_multi_leg_idx = 0;
+  int num_active_legs = 2;
+
+  // Round-trip state
+  int active_roundtrip_tab = 0; // 0: Departing, 1: Returning
+  std::string tab_outbound_label = " 🛫 1. Departing Flight ";
+  std::string tab_return_label = " 🛬 2. Returning Flight ";
+  std::vector<RoutingResult> outbound_candidates;
+  std::vector<RoutingResult> outbound_filtered;
+  int outbound_selected_idx = 0;
+
+  std::vector<RoutingResult> return_candidates;
+  std::vector<RoutingResult> return_filtered;
+  int return_selected_idx = 0;
+
+  uint32_t return_source_id = 0;
+  uint32_t return_dest_id = 0;
 
   // Flight Picker Preference (0: Best Recommended, 1: Cheapest, 2: Fastest)
   int selected_preference = 0;
   int last_preference = 0;
   int selected_flight_idx = 0;
+
+  // Tracked Interactive Bounding Boxes (Hover Cursor & Focus/Click Precision)
   std::vector<ftxui::Box> option_boxes;
   ftxui::Box cheapest_summary_box;
   ftxui::Box fastest_summary_box;
+  ftxui::Box swap_box;
+  ftxui::Box dep_date_box;
+  ftxui::Box ret_date_box;
+  ftxui::Box tab_outbound_box;
+  ftxui::Box tab_return_box;
+  ftxui::Box leg_tab_boxes[4];
+  ftxui::Box leg_date_boxes[4];
+  ftxui::Box leg_src_boxes[4];
+  ftxui::Box leg_dst_boxes[4];
+  ftxui::Box src_input_box;
+  ftxui::Box dst_input_box;
+  ftxui::Box filter_input_box;
+  ftxui::Box map_toggle_box;
+  ftxui::Box research_toggle_box;
+  ftxui::Box exit_box;
+  ftxui::Box trip_type_box;
+  ftxui::Box preference_box;
+  ftxui::Box search_box;
+  ftxui::Box src_sugg_boxes[MAX_SUGGESTIONS];
+  ftxui::Box dst_sugg_boxes[MAX_SUGGESTIONS];
+  ftxui::Box add_leg_box;
+  ftxui::Box remove_leg_box;
+  ftxui::Box clear_filter_box;
+  ftxui::Box chip_boxes[6];
+  ftxui::Box footer_boxes[5];
+
   std::vector<std::string> preference_entries = {
       " ⭐ Best Value ", " 🏷️  Cheapest ", " ⚡ Fastest "};
+
+  // Convert dataset flight_day (days since 2026-10-01) back to YYYY-MM-DD
+  static std::string flight_day_to_iso(int flight_day) {
+    int y = 2026;
+    int m = 10;
+    int d = 1 + std::max(0, flight_day);
+    while (true) {
+      int dim = FlightPlanner::TUI::CalendarPicker::days_in_month(y, m);
+      if (d <= dim)
+        break;
+      d -= dim;
+      if (++m > 12) {
+        m = 1;
+        y++;
+      }
+    }
+    return FlightPlanner::TUI::CalendarPicker::format_date_iso(y, m, d);
+  }
+
+  // Returns {first_leg_departure_utc_mins, last_leg_arrival_utc_mins}
+  std::pair<uint32_t, uint32_t>
+  get_itinerary_utc_bounds(const RoutingResult &res, uint32_t src_id) const {
+    if (!res.success || res.path.empty() || src_id >= loader.nodes.size()) {
+      return {0, 0};
+    }
+    uint32_t curr_node = src_id;
+    uint32_t first_dep_utc = 0;
+    uint32_t last_arr_utc = 0;
+    for (size_t i = 0; i < res.path.size(); ++i) {
+      const flight &f = res.path[i];
+      if (curr_node >= loader.nodes.size())
+        break;
+      int32_t orig_offset = loader.nodes[curr_node].utc_offset_15m * 15;
+      uint32_t dep_utc = static_cast<uint32_t>(
+          static_cast<int32_t>(f.flight_day * 1440 + f.departure_time) -
+          orig_offset);
+      uint32_t arr_utc = dep_utc + f.duration_mins;
+      if (i == 0)
+        first_dep_utc = dep_utc;
+      last_arr_utc = arr_utc;
+      curr_node = f.destination_id;
+    }
+    return {first_dep_utc, last_arr_utc};
+  }
+
+  // Minimum UTC departure time required for return flight after ongoing lands
+  uint32_t get_outbound_min_return_utc() const {
+    if (outbound_filtered.empty() || outbound_selected_idx < 0 ||
+        outbound_selected_idx >= static_cast<int>(outbound_filtered.size()) ||
+        return_source_id >= loader.nodes.size()) {
+      return 0;
+    }
+    auto bounds = get_itinerary_utc_bounds(
+        outbound_filtered[outbound_selected_idx], active_source_id);
+    if (bounds.second == 0)
+      return 0;
+    return bounds.second + loader.nodes[return_source_id].min_transfer;
+  }
+
+  // Minimum allowed return ISO date based on ongoing departure & arrival
+  std::string get_min_return_date_iso() const {
+    std::string min_iso = dep_date_str;
+    if (!outbound_filtered.empty() && outbound_selected_idx >= 0 &&
+        outbound_selected_idx < static_cast<int>(outbound_filtered.size()) &&
+        active_dest_id < loader.nodes.size()) {
+      auto bounds = get_itinerary_utc_bounds(
+          outbound_filtered[outbound_selected_idx], active_source_id);
+      if (bounds.second > 0) {
+        int32_t dst_offset = loader.nodes[active_dest_id].utc_offset_15m * 15;
+        int32_t local_arr_mins = static_cast<int32_t>(bounds.second) + dst_offset;
+        int arr_day = local_arr_mins >= 0 ? (local_arr_mins / 1440) : 0;
+        std::string arr_iso = flight_day_to_iso(arr_day);
+        if (arr_iso > min_iso)
+          min_iso = arr_iso;
+      }
+    }
+    return min_iso;
+  }
+
+  bool is_valid_return_after_outbound(const RoutingResult &ret_res) const {
+    uint32_t min_ret_utc = get_outbound_min_return_utc();
+    if (min_ret_utc == 0)
+      return true;
+    auto ret_bounds = get_itinerary_utc_bounds(ret_res, return_source_id);
+    return ret_bounds.first >= min_ret_utc;
+  }
+
+  uint32_t get_leg_min_departure_utc(int leg_idx) const {
+    if (leg_idx <= 0 || leg_idx >= num_active_legs)
+      return 0;
+    const auto &prev = multi_city_legs[leg_idx - 1];
+    if (prev.filtered.empty() || prev.selected_idx < 0 ||
+        prev.selected_idx >= static_cast<int>(prev.filtered.size()) ||
+        multi_city_legs[leg_idx].src_id >= loader.nodes.size()) {
+      return 0;
+    }
+    auto bounds = get_itinerary_utc_bounds(prev.filtered[prev.selected_idx],
+                                           prev.src_id);
+    if (bounds.second == 0)
+      return 0;
+    return bounds.second +
+           loader.nodes[multi_city_legs[leg_idx].src_id].min_transfer;
+  }
 
   // World Map Visualization State
   bool show_world_map = true;
@@ -90,16 +290,18 @@ public:
   std::vector<std::string> airline_entries = {"All Airlines"};
   std::vector<std::string> airline_codes = {"ALL"};
 
-  // Candidate pool & filtered itineraries
+  // Candidate pool & filtered itineraries for currently viewed flight leg
   std::vector<RoutingResult> all_candidates;
   std::vector<RoutingResult> filtered_itineraries;
 
   bool matches_filters(const RoutingResult &res) const {
-    if (!res.success || res.path.empty()) return false;
+    if (!res.success || res.path.empty())
+      return false;
 
     // 1. Stops / Transits Filter
     size_t stops = res.path.size() - 1;
-    if (active_spec.max_stops != -1 && stops > static_cast<size_t>(active_spec.max_stops)) {
+    if (active_spec.max_stops != -1 &&
+        stops > static_cast<size_t>(active_spec.max_stops)) {
       return false;
     }
 
@@ -108,16 +310,19 @@ public:
       bool found = false;
       for (const auto &f : res.path) {
         if (f.flight_details_id < loader.ui_flights.size()) {
-          const std::string &code = loader.ui_flights[f.flight_details_id].airline_code;
+          const std::string &code =
+              loader.ui_flights[f.flight_details_id].airline_code;
           if (code == active_spec.target_airline_code ||
               (!active_spec.target_airline_name.empty() &&
-               loader.get_airline_name(code) == active_spec.target_airline_name)) {
+               loader.get_airline_name(code) ==
+                   active_spec.target_airline_name)) {
             found = true;
             break;
           }
         }
       }
-      if (!found) return false;
+      if (!found)
+        return false;
     }
 
     // 3. Price Filter
@@ -126,68 +331,43 @@ public:
     }
 
     // 4. Departure Time Filter (Local departure minute: 0..1439)
-    if (active_spec.dep_time_start_min != -1 && active_spec.dep_time_end_min != -1) {
+    if (active_spec.dep_time_start_min != -1 &&
+        active_spec.dep_time_end_min != -1) {
       uint16_t dep_time = res.path.front().departure_time;
-      if (dep_time < active_spec.dep_time_start_min || dep_time >= active_spec.dep_time_end_min) {
+      if (dep_time < active_spec.dep_time_start_min ||
+          dep_time >= active_spec.dep_time_end_min) {
         return false;
       }
     }
 
     // 5. Max Duration Filter
-    if (active_spec.max_duration_mins != -1 && res.total_time_mins > active_spec.max_duration_mins) {
+    if (active_spec.max_duration_mins != -1 &&
+        res.total_time_mins > active_spec.max_duration_mins) {
       return false;
     }
 
     return true;
   }
 
-  void apply_filters() {
-    // 1. Gather available route airlines for matching
-    std::vector<std::pair<std::string, std::string>> available_airlines;
-    for (const auto &code : airline_codes) {
-      if (code != "ALL") {
-        available_airlines.push_back({code, loader.get_airline_name(code)});
-      }
-    }
-    for (const auto &entry : loader.airline_names) {
-      available_airlines.push_back({entry.first, entry.second});
-    }
-
-    active_spec = FilterParser::parse_typed_filter(typed_filter_str, available_airlines);
-
-    // If preference is typed (e.g. "cheapest", "fastest", "best")
-    if (active_spec.preference_override != -1) {
-      selected_preference = active_spec.preference_override;
-    }
-
-    filtered_itineraries.clear();
-    for (const auto &res : all_candidates) {
-      if (matches_filters(res)) {
-        filtered_itineraries.push_back(res);
-      }
-    }
-
-    if (!filtered_itineraries.empty()) {
-      // 1. Identify cheapest among filtered
-      cheapest_flight = filtered_itineraries[0];
-      for (const auto &res : filtered_itineraries) {
+  void update_best_cheapest_fastest(const std::vector<RoutingResult> &pool) {
+    if (!pool.empty()) {
+      cheapest_flight = pool[0];
+      for (const auto &res : pool) {
         if (res.total_price < cheapest_flight.total_price) {
           cheapest_flight = res;
         }
       }
 
-      // 2. Identify fastest among filtered
-      fastest_flight = filtered_itineraries[0];
-      for (const auto &res : filtered_itineraries) {
+      fastest_flight = pool[0];
+      for (const auto &res : pool) {
         if (res.total_time_mins < fastest_flight.total_time_mins) {
           fastest_flight = res;
         }
       }
 
-      // 3. Identify best recommended among filtered (generalized economic balance)
-      best_flight = filtered_itineraries[0];
+      best_flight = pool[0];
       double best_score = std::numeric_limits<double>::max();
-      for (const auto &res : filtered_itineraries) {
+      for (const auto &res : pool) {
         double score = res.total_price + (res.total_time_mins * 0.3) +
                        ((res.path.size() - 1) * 75.0);
         if (score < best_score) {
@@ -200,7 +380,6 @@ public:
               ? "Non-stop direct flight matching your filters."
               : "Optimal balance between ticket fare and journey duration.";
 
-      // 4. Populate alternative itineraries (excluding the chosen flight)
       yen_alternatives.clear();
       std::string chosen_key = serialize_path_key(
           (selected_preference == 0)
@@ -208,15 +387,14 @@ public:
               : (selected_preference == 1) ? cheapest_flight.path
                                            : fastest_flight.path);
 
-      for (const auto &res : filtered_itineraries) {
+      for (const auto &res : pool) {
         if (serialize_path_key(res.path) != chosen_key) {
           yen_alternatives.push_back(res);
         }
       }
 
-      // Keep selected_flight_idx within valid range
       if (selected_flight_idx < 0 ||
-          selected_flight_idx >= static_cast<int>(filtered_itineraries.size())) {
+          selected_flight_idx >= static_cast<int>(pool.size())) {
         sync_selected_flight_from_preference();
       }
     } else {
@@ -225,6 +403,100 @@ public:
       best_flight = RoutingResult{false, 0, 0, {}, {}};
       yen_alternatives.clear();
       selected_flight_idx = -1;
+    }
+  }
+
+  void apply_filters() {
+    std::vector<std::pair<std::string, std::string>> available_airlines;
+    for (const auto &code : airline_codes) {
+      if (code != "ALL") {
+        available_airlines.push_back({code, loader.get_airline_name(code)});
+      }
+    }
+    for (const auto &entry : loader.airline_names) {
+      available_airlines.push_back({entry.first, entry.second});
+    }
+
+    active_spec =
+        FilterParser::parse_typed_filter(typed_filter_str, available_airlines);
+
+    if (active_spec.preference_override != -1) {
+      selected_preference = active_spec.preference_override;
+    }
+
+    if (selected_trip_type == 1) { // One-way
+      filtered_itineraries.clear();
+      for (const auto &res : all_candidates) {
+        if (matches_filters(res))
+          filtered_itineraries.push_back(res);
+      }
+      update_best_cheapest_fastest(filtered_itineraries);
+    } else if (selected_trip_type == 0) { // Round-trip
+      outbound_filtered.clear();
+      for (const auto &res : outbound_candidates) {
+        if (matches_filters(res))
+          outbound_filtered.push_back(res);
+      }
+      if (outbound_filtered.empty()) {
+        outbound_selected_idx = -1;
+      } else if (outbound_selected_idx < 0 ||
+                 outbound_selected_idx >=
+                     static_cast<int>(outbound_filtered.size())) {
+        outbound_selected_idx = 0;
+      }
+
+      return_filtered.clear();
+      for (const auto &res : return_candidates) {
+        if (matches_filters(res) && is_valid_return_after_outbound(res))
+          return_filtered.push_back(res);
+      }
+      if (return_filtered.empty()) {
+        return_selected_idx = -1;
+      } else if (return_selected_idx < 0 ||
+                 return_selected_idx >=
+                     static_cast<int>(return_filtered.size())) {
+        return_selected_idx = 0;
+      }
+
+      if (active_roundtrip_tab == 0) {
+        all_candidates = outbound_candidates;
+        filtered_itineraries = outbound_filtered;
+        selected_flight_idx = outbound_selected_idx;
+      } else {
+        all_candidates = return_candidates;
+        filtered_itineraries = return_filtered;
+        selected_flight_idx = return_selected_idx;
+      }
+      update_best_cheapest_fastest(filtered_itineraries);
+    } else { // Multi-city
+      for (int i = 0; i < num_active_legs; ++i) {
+        multi_city_legs[i].filtered.clear();
+        uint32_t min_dep_utc = get_leg_min_departure_utc(i);
+        for (const auto &res : multi_city_legs[i].candidates) {
+          if (!matches_filters(res))
+            continue;
+          if (min_dep_utc > 0) {
+            auto b = get_itinerary_utc_bounds(res, multi_city_legs[i].src_id);
+            if (b.first < min_dep_utc)
+              continue;
+          }
+          multi_city_legs[i].filtered.push_back(res);
+        }
+        if (multi_city_legs[i].filtered.empty()) {
+          multi_city_legs[i].selected_idx = -1;
+        } else if (multi_city_legs[i].selected_idx < 0 ||
+                   multi_city_legs[i].selected_idx >=
+                       static_cast<int>(multi_city_legs[i].filtered.size())) {
+          multi_city_legs[i].selected_idx = 0;
+        }
+      }
+      if (active_multi_leg_idx < num_active_legs) {
+        all_candidates = multi_city_legs[active_multi_leg_idx].candidates;
+        filtered_itineraries = multi_city_legs[active_multi_leg_idx].filtered;
+        selected_flight_idx =
+            multi_city_legs[active_multi_leg_idx].selected_idx;
+      }
+      update_best_cheapest_fastest(filtered_itineraries);
     }
   }
 
@@ -246,11 +518,44 @@ public:
       for (size_t i = 0; i < filtered_itineraries.size(); ++i) {
         if (serialize_path_key(filtered_itineraries[i].path) == target_key) {
           selected_flight_idx = static_cast<int>(i);
+          on_select_flight_option(selected_flight_idx);
           return;
         }
       }
     }
     selected_flight_idx = 0;
+    on_select_flight_option(selected_flight_idx);
+  }
+
+  void on_select_flight_option(int idx) {
+    if (idx < 0 || idx >= (int)filtered_itineraries.size())
+      return;
+    selected_flight_idx = idx;
+
+    if (selected_trip_type == 0) { // Round-trip
+      if (active_roundtrip_tab == 0) {
+        outbound_selected_idx = idx;
+        // Ensure return flight options never precede the newly picked outbound arrival
+        uint32_t min_ret_utc = get_outbound_min_return_utc();
+        if (return_source_id < loader.nodes.size() &&
+            return_dest_id < loader.nodes.size()) {
+          std::string min_ret_iso = get_min_return_date_iso();
+          if (ret_date_str < min_ret_iso) {
+            ret_date_str = min_ret_iso;
+            update_date_btn_labels();
+          }
+          return_candidates = query_corridor(return_source_id, return_dest_id,
+                                             ret_date_str, min_ret_utc);
+          apply_filters();
+        }
+      } else {
+        return_selected_idx = idx;
+      }
+    } else if (selected_trip_type == 2) { // Multi-city
+      if (active_multi_leg_idx < num_active_legs) {
+        multi_city_legs[active_multi_leg_idx].selected_idx = idx;
+      }
+    }
   }
 
   void reset_filters() {
@@ -270,7 +575,8 @@ public:
     }
 
     if (!active_spec.target_airline_name.empty()) {
-      parts.push_back("Airline: " + active_spec.target_airline_name + " (" + active_spec.target_airline_code + ")");
+      parts.push_back("Airline: " + active_spec.target_airline_name + " (" +
+                      active_spec.target_airline_code + ")");
     } else if (!active_spec.target_airline_code.empty()) {
       parts.push_back("Airline: " + active_spec.target_airline_code);
     }
@@ -301,7 +607,7 @@ public:
     return out;
   }
 
-  // Mode state: starts in Customer Mode
+  // Mode state: starts in Customer Mode (Google Flights)
   bool show_research_mode = false;
   std::string research_btn_label = " 🔬 Research Mode: OFF ";
   std::string status_message = "Ready. Click SEARCH FLIGHTS to query.";
@@ -323,7 +629,6 @@ public:
   uint32_t active_dest_id = 0;
   RoutingResult best_flight;
   std::string best_reason;
-  double best_gen_cost = 0.0;
   RoutingResult cheapest_flight;
   RoutingResult fastest_flight;
   std::vector<RoutingResult> yen_k_paths;
@@ -336,14 +641,26 @@ public:
                  const std::string &init_date = "2026-11-15",
                  bool start_research_mode = false)
       : loader(dl), source_str(init_src), dest_str(init_dst),
-        target_date_str(init_date), show_research_mode(start_research_mode) {
+        target_date_str(init_date), dep_date_str(init_date),
+        show_research_mode(start_research_mode) {
 
-    for (int d = 1; d <= 31; ++d) {
-      std::string s = (d < 10 ? "0" : "") + std::to_string(d);
-      day_entries.push_back(s);
-    }
+    // Initialize Multi-City Legs default itineraries
+    multi_city_legs.resize(4);
+    multi_city_legs[0] = {"DAC", "DXB", "2026-11-15", " 📅 Dep: Sun, Nov 15 ",
+                          0,     0,     {},           {},
+                          {},    {},    0};
+    multi_city_legs[1] = {"DXB", "JFK", "2026-11-18", " 📅 Dep: Wed, Nov 18 ",
+                          0,     0,     {},           {},
+                          {},    {},    0};
+    multi_city_legs[2] = {"JFK", "LHR", "2026-11-22", " 📅 Dep: Sun, Nov 22 ",
+                          0,     0,     {},           {},
+                          {},    {},    0};
+    multi_city_legs[3] = {"LHR", "DAC", "2026-11-25", " 📅 Dep: Wed, Nov 25 ",
+                          0,     0,     {},           {},
+                          {},    {},    0};
+    num_active_legs = 2;
 
-    parse_initial_date(init_date);
+    update_date_btn_labels();
     update_research_btn_label();
     update_suggestions();
   }
@@ -351,17 +668,6 @@ public:
   void update_research_btn_label() {
     research_btn_label = show_research_mode ? " 🧪 Research Mode: ON  "
                                             : " 🔬 Research Mode: OFF ";
-  }
-
-  static std::string to_upper_trimmed(const std::string &s) {
-    std::string out;
-    out.reserve(s.size());
-    for (unsigned char c : s) {
-      if (!std::isspace(c)) {
-        out.push_back(static_cast<char>(std::toupper(c)));
-      }
-    }
-    return out;
   }
 
   static std::string serialize_path_key(const std::vector<flight> &path) {
@@ -375,32 +681,73 @@ public:
     return key;
   }
 
-  void parse_initial_date(const std::string &date_str) {
-    if (date_str.size() >= 10 && date_str[4] == '-' && date_str[7] == '-') {
-      try {
-        std::string y = date_str.substr(0, 4);
-        int m = std::stoi(date_str.substr(5, 2)) - 1;
-        int d = std::stoi(date_str.substr(8, 2)) - 1;
-
-        if (y == "2027")
-          year_idx = 1;
-        else
-          year_idx = 0;
-
-        if (m >= 0 && m < 12)
-          month_idx = m;
-        if (d >= 0 && d < 31)
-          day_idx = d;
-      } catch (...) {
+  void update_airline_entries_from_candidates(
+      const std::vector<RoutingResult> &candidates) {
+    std::set<std::string> unique_codes;
+    for (const auto &res : candidates) {
+      for (const auto &f : res.path) {
+        if (f.flight_details_id < loader.ui_flights.size()) {
+          unique_codes.insert(
+              loader.ui_flights[f.flight_details_id].airline_code);
+        }
       }
+    }
+    airline_entries = {"All Airlines"};
+    airline_codes = {"ALL"};
+    for (const auto &code : unique_codes) {
+      airline_codes.push_back(code);
+      std::string name = loader.get_airline_name(code);
+      if (name.size() > 14)
+        name = name.substr(0, 13) + "…";
+      airline_entries.push_back(code + " - " + name);
     }
   }
 
-  void update_target_date_from_tool() {
-    std::string y = year_entries[year_idx];
-    std::string m = month_entries[month_idx].substr(0, 2);
-    std::string d = day_entries[day_idx];
-    target_date_str = y + "-" + m + "-" + d;
+  std::vector<RoutingResult> query_corridor(uint32_t src_id, uint32_t dst_id,
+                                           const std::string &date_str,
+                                           uint32_t min_start_utc = 0) {
+    uint32_t start_day = DataLoader::parse_date_to_days(date_str);
+    int32_t source_utc_offset =
+        loader.nodes[src_id].utc_offset_15m * 15;
+    uint32_t date_start_utc = static_cast<uint32_t>(
+        static_cast<int32_t>(start_day * 1440) - source_utc_offset);
+    uint32_t absolute_start_time = std::max(date_start_utc, min_start_utc);
+
+    YenRouter yen_router;
+    auto yen_start = std::chrono::high_resolution_clock::now();
+    YenRouter::YenKResult yen_k = yen_router.run(
+        src_id, dst_id, loader.adjacency_list, loader.nodes,
+        OptimizeFor::PRICE, absolute_start_time, 15);
+    yen_compute_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::high_resolution_clock::now() - yen_start)
+                         .count();
+
+    AStar astar_router;
+    RoutingResult absolute_fastest = astar_router.run(
+        src_id, dst_id, loader.adjacency_list, loader.nodes,
+        OptimizeFor::TIME, absolute_start_time);
+
+    std::vector<RoutingResult> candidates;
+    std::unordered_set<std::string> seen_keys;
+    for (const auto &p : yen_k.k_paths) {
+      if (p.success && !p.path.empty()) {
+        std::string k = serialize_path_key(p.path);
+        if (seen_keys.find(k) == seen_keys.end()) {
+          seen_keys.insert(k);
+          candidates.push_back(p);
+        }
+      }
+    }
+
+    if (absolute_fastest.success && !absolute_fastest.path.empty()) {
+      std::string k = serialize_path_key(absolute_fastest.path);
+      if (seen_keys.find(k) == seen_keys.end()) {
+        seen_keys.insert(k);
+        candidates.push_back(absolute_fastest);
+      }
+    }
+
+    return candidates;
   }
 
   void ensure_offline_preprocessed() {
@@ -430,7 +777,7 @@ public:
     ensure_offline_preprocessed();
     researcher_benchmarks.clear();
 
-    uint32_t start_day = DataLoader::parse_date_to_days(target_date_str);
+    uint32_t start_day = DataLoader::parse_date_to_days(dep_date_str);
     int32_t source_utc_offset =
         loader.nodes[active_source_id].utc_offset_15m * 15;
     uint32_t absolute_start_time = static_cast<uint32_t>(
@@ -758,117 +1105,242 @@ public:
   }
 
   void execute_search(bool run_all_research = false) {
-    update_target_date_from_tool();
-    researcher_benchmarks.clear(); // Always invalidate stale benchmarks
+    researcher_benchmarks.clear();
+    update_date_btn_labels();
+    target_date_str = dep_date_str;
 
-    std::string orig_src = source_str;
-    std::string orig_dst = dest_str;
+    if (selected_trip_type == 1) { // ONE-WAY
+      std::string orig_src = source_str;
+      std::string orig_dst = dest_str;
 
-    std::string resolved_src = AirportSearch::resolve_airport_code(source_str, loader);
-    std::string resolved_dst = AirportSearch::resolve_airport_code(dest_str, loader);
+      std::string res_src =
+          AirportSearch::resolve_airport_code(source_str, loader);
+      std::string res_dst =
+          AirportSearch::resolve_airport_code(dest_str, loader);
 
-    if (resolved_src.empty() || loader.iata_to_id.find(resolved_src) == loader.iata_to_id.end()) {
-      status_message = "❌ Origin airport not found for '" + source_str + "'. Try city, country or IATA code.";
-      has_results = false;
-      return;
-    }
-    if (resolved_dst.empty() || loader.iata_to_id.find(resolved_dst) == loader.iata_to_id.end()) {
-      status_message = "❌ Destination airport not found for '" + dest_str + "'. Try city, country or IATA code.";
-      has_results = false;
-      return;
-    }
+      if (res_src.empty() ||
+          loader.iata_to_id.find(res_src) == loader.iata_to_id.end()) {
+        status_message = "❌ Origin airport not found for '" + source_str +
+                         "'. Try city, country or IATA code.";
+        has_results = false;
+        return;
+      }
+      if (res_dst.empty() ||
+          loader.iata_to_id.find(res_dst) == loader.iata_to_id.end()) {
+        status_message = "❌ Destination airport not found for '" + dest_str +
+                         "'. Try city, country or IATA code.";
+        has_results = false;
+        return;
+      }
 
-    source_str = resolved_src;
-    dest_str = resolved_dst;
-    update_suggestions();
+      source_str = res_src;
+      dest_str = res_dst;
+      update_suggestions();
 
-    active_source_id = loader.iata_to_id[source_str];
-    active_dest_id = loader.iata_to_id[dest_str];
+      active_source_id = loader.iata_to_id[source_str];
+      active_dest_id = loader.iata_to_id[dest_str];
 
-    uint32_t start_day = DataLoader::parse_date_to_days(target_date_str);
-    int32_t source_utc_offset =
-        loader.nodes[active_source_id].utc_offset_15m * 15;
-    uint32_t absolute_start_time = static_cast<uint32_t>(
-        static_cast<int32_t>(start_day * 1440) - source_utc_offset);
+      all_candidates =
+          query_corridor(active_source_id, active_dest_id, dep_date_str);
+      yen_k_paths = all_candidates;
 
-    // 1. Customer Mode Quick Search (Yen's K-SP & A*)
-    YenRouter yen_router;
-    auto yen_start = std::chrono::high_resolution_clock::now();
-    YenRouter::YenKResult yen_k = yen_router.run(
-        active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::PRICE, absolute_start_time, 15);
-    yen_compute_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                         std::chrono::high_resolution_clock::now() - yen_start)
-                         .count();
+      update_airline_entries_from_candidates(all_candidates);
+      apply_filters();
+      sync_selected_flight_from_preference();
 
-    AStar astar_router;
-    RoutingResult absolute_fastest = astar_router.run(
-        active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::TIME, absolute_start_time);
+      has_results = !all_candidates.empty();
+      scroll_line = 0;
 
-    all_candidates.clear();
-    std::unordered_set<std::string> seen_keys;
-    for (const auto &p : yen_k.k_paths) {
-      if (p.success && !p.path.empty()) {
-        std::string k = serialize_path_key(p.path);
-        if (seen_keys.find(k) == seen_keys.end()) {
-          seen_keys.insert(k);
-          all_candidates.push_back(p);
+      if (show_research_mode || run_all_research) {
+        run_research_suite();
+      }
+
+      status_message = "✅ One-way: " + source_str + " ➔ " + dest_str + " (" +
+                       dep_date_str + ")  |  " +
+                       std::to_string(all_candidates.size()) +
+                       " itineraries found";
+
+    } else if (selected_trip_type == 0) { // ROUND-TRIP
+      std::string res_src =
+          AirportSearch::resolve_airport_code(source_str, loader);
+      std::string res_dst =
+          AirportSearch::resolve_airport_code(dest_str, loader);
+
+      if (res_src.empty() ||
+          loader.iata_to_id.find(res_src) == loader.iata_to_id.end()) {
+        status_message = "❌ Origin airport not found for '" + source_str +
+                         "'. Try city, country or IATA code.";
+        has_results = false;
+        return;
+      }
+      if (res_dst.empty() ||
+          loader.iata_to_id.find(res_dst) == loader.iata_to_id.end()) {
+        status_message = "❌ Destination airport not found for '" + dest_str +
+                         "'. Try city, country or IATA code.";
+        has_results = false;
+        return;
+      }
+
+      source_str = res_src;
+      dest_str = res_dst;
+      update_suggestions();
+
+      active_source_id = loader.iata_to_id[source_str];
+      active_dest_id = loader.iata_to_id[dest_str];
+      return_source_id = active_dest_id;
+      return_dest_id = active_source_id;
+
+      if (ret_date_str < dep_date_str) {
+        ret_date_str = dep_date_str;
+        update_date_btn_labels();
+      }
+
+      outbound_candidates =
+          query_corridor(active_source_id, active_dest_id, dep_date_str);
+      outbound_selected_idx = 0;
+
+      // Filter outbound first so we know when the selected ongoing flight arrives
+      return_candidates.clear();
+      return_filtered.clear();
+      int saved_tab = active_roundtrip_tab;
+      active_roundtrip_tab = 0;
+      apply_filters();
+      if (!outbound_filtered.empty()) {
+        std::string target_key;
+        if (selected_preference == 0 && best_flight.success)
+          target_key = serialize_path_key(best_flight.path);
+        else if (selected_preference == 1 && cheapest_flight.success)
+          target_key = serialize_path_key(cheapest_flight.path);
+        else if (selected_preference == 2 && fastest_flight.success)
+          target_key = serialize_path_key(fastest_flight.path);
+        for (size_t i = 0; i < outbound_filtered.size(); ++i) {
+          if (serialize_path_key(outbound_filtered[i].path) == target_key) {
+            outbound_selected_idx = static_cast<int>(i);
+            break;
+          }
         }
       }
-    }
 
-    if (absolute_fastest.success && !absolute_fastest.path.empty()) {
-      std::string k = serialize_path_key(absolute_fastest.path);
-      if (seen_keys.find(k) == seen_keys.end()) {
-        seen_keys.insert(k);
-        all_candidates.push_back(absolute_fastest);
+      // Clamp return date to never be earlier than ongoing departure/arrival
+      std::string min_ret_iso = get_min_return_date_iso();
+      if (ret_date_str < min_ret_iso) {
+        ret_date_str = min_ret_iso;
+        update_date_btn_labels();
       }
-    }
 
-    yen_k_paths = all_candidates;
+      uint32_t min_ret_utc = get_outbound_min_return_utc();
+      return_candidates = query_corridor(return_source_id, return_dest_id,
+                                         ret_date_str, min_ret_utc);
 
-    // Dynamically populate airlines from discovered routes
-    std::set<std::string> unique_airline_codes;
-    for (const auto &res : all_candidates) {
-      for (const auto &f : res.path) {
-        if (f.flight_details_id < loader.ui_flights.size()) {
-          unique_airline_codes.insert(
-              loader.ui_flights[f.flight_details_id].airline_code);
+      yen_k_paths = outbound_candidates;
+      std::vector<RoutingResult> combined_all = outbound_candidates;
+      combined_all.insert(combined_all.end(), return_candidates.begin(),
+                          return_candidates.end());
+      update_airline_entries_from_candidates(combined_all);
+
+      return_selected_idx = 0;
+      active_roundtrip_tab = 1;
+      apply_filters();
+      if (!return_filtered.empty()) {
+        std::string target_key;
+        if (selected_preference == 0 && best_flight.success)
+          target_key = serialize_path_key(best_flight.path);
+        else if (selected_preference == 1 && cheapest_flight.success)
+          target_key = serialize_path_key(cheapest_flight.path);
+        else if (selected_preference == 2 && fastest_flight.success)
+          target_key = serialize_path_key(fastest_flight.path);
+        for (size_t i = 0; i < return_filtered.size(); ++i) {
+          if (serialize_path_key(return_filtered[i].path) == target_key) {
+            return_selected_idx = static_cast<int>(i);
+            break;
+          }
         }
       }
-    }
 
-    airline_entries = {"All Airlines"};
-    airline_codes = {"ALL"};
-    for (const auto &code : unique_airline_codes) {
-      airline_codes.push_back(code);
-      std::string name = loader.get_airline_name(code);
-      if (name.size() > 14)
-        name = name.substr(0, 13) + "…";
-      airline_entries.push_back(code + " - " + name);
-    }
+      active_roundtrip_tab = saved_tab;
+      apply_filters();
 
-    // Apply active filters to candidate pool
-    apply_filters();
-    sync_selected_flight_from_preference();
+      has_results =
+          !outbound_candidates.empty() || !return_candidates.empty();
+      scroll_line = 0;
 
-    has_results = !all_candidates.empty();
-    scroll_line = 0;
+      if (show_research_mode || run_all_research) {
+        run_research_suite();
+      }
 
-    // 2. Researcher Suite (if Research Mode is enabled or requested)
-    if (show_research_mode || run_all_research) {
-      run_research_suite();
-    }
+      status_message = "✅ Round-trip: " + source_str + " ⇄ " + dest_str +
+                       "  |  " + std::to_string(outbound_filtered.size()) +
+                       " outbound, " +
+                       std::to_string(return_filtered.size()) +
+                       " return found";
 
-    if (orig_src != source_str || orig_dst != dest_str) {
-      status_message = "✅ Resolved: '" + orig_src + "' ➔ " + source_str +
-                       ", '" + orig_dst + "' ➔ " + dest_str + "  |  " +
-                       std::to_string(yen_k_paths.size()) + " itineraries found";
-    } else {
-      status_message = "✅ " + source_str + " ──▶ " + dest_str + " (" +
-                       target_date_str + ")  |  " +
-                       std::to_string(yen_k_paths.size()) + " itineraries found";
+    } else { // MULTI-CITY
+      std::vector<RoutingResult> combined_multi;
+
+      for (int i = 0; i < num_active_legs; ++i) {
+        if (i > 0 && multi_city_legs[i].date_str < multi_city_legs[i - 1].date_str) {
+          multi_city_legs[i].date_str = multi_city_legs[i - 1].date_str;
+          multi_city_legs[i].date_btn_label =
+              " 📅 " +
+              FlightPlanner::TUI::CalendarPicker::format_iso_to_short(
+                  multi_city_legs[i].date_str) +
+              " ";
+        }
+
+        std::string res_s = AirportSearch::resolve_airport_code(
+            multi_city_legs[i].origin, loader);
+        std::string res_d =
+            AirportSearch::resolve_airport_code(multi_city_legs[i].dest, loader);
+
+        if (res_s.empty() ||
+            loader.iata_to_id.find(res_s) == loader.iata_to_id.end() ||
+            res_d.empty() ||
+            loader.iata_to_id.find(res_d) == loader.iata_to_id.end()) {
+          status_message = "❌ Flight " + std::to_string(i + 1) +
+                           " airport code invalid. Try city, country or code.";
+          has_results = false;
+          return;
+        }
+
+        multi_city_legs[i].origin = res_s;
+        multi_city_legs[i].dest = res_d;
+        multi_city_legs[i].src_id = loader.iata_to_id[res_s];
+        multi_city_legs[i].dst_id = loader.iata_to_id[res_d];
+        uint32_t leg_min_dep = get_leg_min_departure_utc(i);
+        multi_city_legs[i].candidates =
+            query_corridor(multi_city_legs[i].src_id, multi_city_legs[i].dst_id,
+                           multi_city_legs[i].date_str, leg_min_dep);
+        multi_city_legs[i].filtered = multi_city_legs[i].candidates;
+        multi_city_legs[i].selected_idx = 0;
+
+        combined_multi.insert(combined_multi.end(),
+                              multi_city_legs[i].candidates.begin(),
+                              multi_city_legs[i].candidates.end());
+      }
+
+      if (!multi_city_legs.empty()) {
+        active_source_id = multi_city_legs[0].src_id;
+        active_dest_id = multi_city_legs[0].dst_id;
+        yen_k_paths = multi_city_legs[0].candidates;
+      }
+
+      update_airline_entries_from_candidates(combined_multi);
+      apply_filters();
+      sync_selected_flight_from_preference();
+
+      has_results = true;
+      for (int i = 0; i < num_active_legs; ++i) {
+        if (multi_city_legs[i].candidates.empty())
+          has_results = false;
+      }
+      scroll_line = 0;
+
+      if (show_research_mode || run_all_research) {
+        run_research_suite();
+      }
+
+      status_message = "✅ Multi-city: " + std::to_string(num_active_legs) +
+                       " flights scheduled.";
     }
   }
 
@@ -893,22 +1365,178 @@ public:
     // Initial search execution
     execute_search(show_research_mode);
 
-    // 1. Text Inputs (Mouse Clickable, Single-line, Enter triggers search)
+    // 1. Google Flights Top Selector Controls
+    Component trip_type_toggle =
+        Toggle(&trip_type_entries, &selected_trip_type);
+    Component preference_toggle =
+        Toggle(&preference_entries, &selected_preference);
+
+    // 2. Search Inputs (Origin & Dest with live autocomplete)
     InputOption src_opt;
     src_opt.multiline = false;
-    src_opt.placeholder = "e.g. New York, USA, JFK";
+    src_opt.placeholder = "Where from? (City/Code)";
     src_opt.on_change = [&] { update_suggestions(); };
     src_opt.on_enter = [&] { execute_search(show_research_mode); };
-    Component source_input = Input(&source_str, "e.g. New York, JFK", src_opt);
+    Component source_input = Input(&source_str, "Where from?", src_opt);
 
     InputOption dst_opt;
     dst_opt.multiline = false;
-    dst_opt.placeholder = "e.g. Thailand, London, BKK";
+    dst_opt.placeholder = "Where to? (City/Code)";
     dst_opt.on_change = [&] { update_suggestions(); };
     dst_opt.on_enter = [&] { execute_search(show_research_mode); };
-    Component dest_input = Input(&dest_str, "e.g. Thailand, BKK", dst_opt);
+    Component dest_input = Input(&dest_str, "Where to?", dst_opt);
 
-    // 1b. Interactive Suggestion Buttons (Clickable options as you type)
+    // Swap button ([ ⇄ ])
+    Component swap_btn = Button(
+        " ⇄ ",
+        [&] {
+          std::swap(source_str, dest_str);
+          update_suggestions();
+          execute_search(show_research_mode);
+        },
+        ButtonOption::Border());
+
+    // 3. Calendar Date Buttons (Opens interactive calendar popup)
+    auto open_dep_calendar = [&] {
+      calendar_picker.open(
+          dep_date_str, "Departure Date", [&](const std::string &iso) {
+            dep_date_str = iso;
+            if (ret_date_str < dep_date_str) {
+              ret_date_str = dep_date_str;
+            }
+            update_date_btn_labels();
+            execute_search(show_research_mode);
+          });
+    };
+
+    auto open_ret_calendar = [&] {
+      std::string min_ret_iso = get_min_return_date_iso();
+      calendar_picker.open(
+          ret_date_str, "Return Date",
+          [&](const std::string &iso) {
+            std::string cur_min = get_min_return_date_iso();
+            ret_date_str = (iso < cur_min) ? cur_min : iso;
+            update_date_btn_labels();
+            execute_search(show_research_mode);
+          },
+          min_ret_iso);
+    };
+
+    auto open_leg_calendar = [&](int i) {
+      std::string min_iso = (i > 0) ? multi_city_legs[i - 1].date_str : "";
+      calendar_picker.open(
+          multi_city_legs[i].date_str,
+          "Flight " + std::to_string(i + 1) + " Date",
+          [&, i](const std::string &iso) {
+            multi_city_legs[i].date_str = iso;
+            multi_city_legs[i].date_btn_label =
+                " 📅 " +
+                FlightPlanner::TUI::CalendarPicker::format_iso_to_short(iso) +
+                " ";
+            for (int j = i + 1; j < 4; ++j) {
+              if (multi_city_legs[j].date_str <
+                  multi_city_legs[j - 1].date_str) {
+                multi_city_legs[j].date_str = multi_city_legs[j - 1].date_str;
+                multi_city_legs[j].date_btn_label =
+                    " 📅 " +
+                    FlightPlanner::TUI::CalendarPicker::format_iso_to_short(
+                        multi_city_legs[j].date_str) +
+                    " ";
+              }
+            }
+            execute_search(show_research_mode);
+          },
+          min_iso);
+    };
+
+    Component dep_date_btn = Button(
+        &dep_date_btn_label, [&] { open_dep_calendar(); },
+        ButtonOption::Border());
+
+    Component ret_date_btn = Button(
+        &ret_date_btn_label, [&] { open_ret_calendar(); },
+        ButtonOption::Border());
+
+    // Search button
+    Component search_btn = Button(
+        " 🔍 Search Flights ", [&] { execute_search(show_research_mode); },
+        ButtonOption::Border());
+
+    // 4. Multi-City Components (up to 4 segments)
+    Component leg_src_inputs[4];
+    Component leg_dst_inputs[4];
+    Component leg_date_btns[4];
+    Component leg_tab_btns[4];
+    std::string leg_tab_labels[4];
+
+    for (int i = 0; i < 4; ++i) {
+      InputOption s_opt;
+      s_opt.multiline = false;
+      s_opt.placeholder = "Origin";
+      s_opt.on_enter = [&] { execute_search(show_research_mode); };
+      leg_src_inputs[i] = Input(&multi_city_legs[i].origin, "Origin", s_opt);
+
+      InputOption d_opt;
+      d_opt.multiline = false;
+      d_opt.placeholder = "Destination";
+      d_opt.on_enter = [&] { execute_search(show_research_mode); };
+      leg_dst_inputs[i] =
+          Input(&multi_city_legs[i].dest, "Destination", d_opt);
+
+      leg_date_btns[i] = Button(
+          &multi_city_legs[i].date_btn_label,
+          [&, i] { open_leg_calendar(i); }, ButtonOption::Border());
+
+      leg_tab_labels[i] = " Flight " + std::to_string(i + 1) + " ";
+      leg_tab_btns[i] = Button(
+          &leg_tab_labels[i],
+          [&, i] {
+            active_multi_leg_idx = i;
+            apply_filters();
+          },
+          ButtonOption::Ascii());
+    }
+
+    Component add_leg_btn = Button(
+        " + Add flight ",
+        [&] {
+          if (num_active_legs < 4) {
+            num_active_legs++;
+            execute_search(show_research_mode);
+          }
+        },
+        ButtonOption::Ascii());
+
+    Component remove_leg_btn = Button(
+        " ✕ Remove flight ",
+        [&] {
+          if (num_active_legs > 2) {
+            num_active_legs--;
+            if (active_multi_leg_idx >= num_active_legs)
+              active_multi_leg_idx = num_active_legs - 1;
+            execute_search(show_research_mode);
+          }
+        },
+        ButtonOption::Ascii());
+
+    // 5. Round-trip Google Flights Tab Selectors
+    Component tab_outbound_btn = Button(
+        &tab_outbound_label,
+        [&] {
+          active_roundtrip_tab = 0;
+          apply_filters();
+        },
+        ButtonOption::Ascii());
+
+    Component tab_return_btn = Button(
+        &tab_return_label,
+        [&] {
+          active_roundtrip_tab = 1;
+          apply_filters();
+        },
+        ButtonOption::Ascii());
+
+    // 6. Interactive Suggestion Buttons (Clickable options as you type)
     std::vector<std::string> src_sugg_labels(MAX_SUGGESTIONS);
     std::vector<std::string> dst_sugg_labels(MAX_SUGGESTIONS);
     Components src_buttons;
@@ -965,20 +1593,7 @@ public:
     auto src_sugg_container = Container::Horizontal(src_buttons);
     auto dst_sugg_container = Container::Horizontal(dst_buttons);
 
-    // 2. Date Tool Components (Dropdowns)
-    Component year_dropdown = Dropdown(&year_entries, &year_idx);
-    Component month_dropdown = Dropdown(&month_entries, &month_idx);
-    Component day_dropdown = Dropdown(&day_entries, &day_idx);
-
-    // 3. Flight Preference Picker (Toggle Buttons)
-    Component preference_toggle =
-        Toggle(&preference_entries, &selected_preference);
-
-    // 4. Action Buttons
-    Component search_btn = Button(
-        " 🔍 SEARCH ", [&] { execute_search(show_research_mode); },
-        ButtonOption::Border());
-
+    // 7. Action / Header Buttons
     Component research_toggle_btn = Button(
         &research_btn_label,
         [&] {
@@ -988,7 +1603,6 @@ public:
             if (has_results && researcher_benchmarks.empty()) {
               run_research_suite();
             }
-            // Jump smoothly to the newly revealed Research Mode section
             scroll_line = customer_height_;
           } else {
             scroll_line = 0;
@@ -996,8 +1610,13 @@ public:
         },
         ButtonOption::Border());
 
-    Component exit_btn =
-        Button(" ❌ Exit ", [&] { screen.Exit(); }, ButtonOption::Border());
+    Component exit_btn = Button(
+        " ✕ Exit ",
+        [&] {
+          set_mouse_cursor("");
+          screen.Exit();
+        },
+        ButtonOption::Border());
 
     Component map_toggle_btn = Button(
         &world_map_btn_label,
@@ -1008,7 +1627,7 @@ public:
         },
         ButtonOption::Border());
 
-    // 5. Bottom Scroll Control Buttons (Always Accessible!)
+    // 8. Bottom Scroll Control Buttons
     Component scroll_top_btn = Button(
         " ⤒ Top ", [&] { scroll_line = 0; }, ButtonOption::Ascii());
     Component scroll_up_btn = Button(
@@ -1037,14 +1656,15 @@ public:
         },
         ButtonOption::Ascii());
 
-    // 3b. Typed Flight Needs Filter Component & Chips
+    // 9. Typed Flight Needs Filter Component & Chips
     InputOption filter_opt;
     filter_opt.multiline = false;
-    filter_opt.placeholder = "e.g. non-stop, under $800, Emirates, morning, < 24h";
+    filter_opt.placeholder =
+        "e.g. non-stop, under $800, Emirates, morning, < 24h";
     filter_opt.on_change = [&] { apply_filters(); };
     filter_opt.on_enter = [&] { apply_filters(); };
-    Component filter_input =
-        Input(&typed_filter_str, "e.g. non-stop, under $800, Emirates, morning, < 24h", filter_opt);
+    Component filter_input = Input(
+        &typed_filter_str, "e.g. non-stop, under $800, Emirates", filter_opt);
 
     Component clear_filter_btn = Button(
         " ↺ Clear ", [&] { reset_filters(); }, ButtonOption::Ascii());
@@ -1059,15 +1679,19 @@ public:
     };
 
     Component chip_nonstop = Button(
-        " Non-stop ", [&] { add_need_token("non-stop"); }, ButtonOption::Ascii());
+        " Non-stop ", [&] { add_need_token("non-stop"); },
+        ButtonOption::Ascii());
     Component chip_1stop = Button(
         " ≤ 1 Stop ", [&] { add_need_token("1 stop"); }, ButtonOption::Ascii());
     Component chip_p800 = Button(
-        " Under $800 ", [&] { add_need_token("under $800"); }, ButtonOption::Ascii());
+        " Under $800 ", [&] { add_need_token("under $800"); },
+        ButtonOption::Ascii());
     Component chip_p1000 = Button(
-        " Under $1,000 ", [&] { add_need_token("under $1000"); }, ButtonOption::Ascii());
+        " Under $1,000 ", [&] { add_need_token("under $1000"); },
+        ButtonOption::Ascii());
     Component chip_morning = Button(
-        " Morning ", [&] { add_need_token("morning"); }, ButtonOption::Ascii());
+        " Morning ", [&] { add_need_token("morning"); },
+        ButtonOption::Ascii());
     Component chip_dur24 = Button(
         " < 24h ", [&] { add_need_token("< 24h"); }, ButtonOption::Ascii());
 
@@ -1088,7 +1712,7 @@ public:
         quick_chips_container,
     });
 
-    // 3c. Interactive Flight Option Buttons Pool (Clickable options)
+    // 10. Clickable Flight Option Buttons Pool
     constexpr static size_t MAX_OPTION_BUTTONS = 40;
     std::vector<std::string> opt_btn_labels(MAX_OPTION_BUTTONS);
     Components opt_buttons;
@@ -1097,7 +1721,7 @@ public:
           &opt_btn_labels[i],
           [&, i] {
             if (i < filtered_itineraries.size()) {
-              selected_flight_idx = static_cast<int>(i);
+              on_select_flight_option(static_cast<int>(i));
             }
           },
           ButtonOption::Ascii());
@@ -1113,20 +1737,38 @@ public:
         exit_btn,
     });
 
+    Components multi_city_components;
+    for (int i = 0; i < 4; ++i) {
+      multi_city_components.push_back(leg_src_inputs[i]);
+      multi_city_components.push_back(leg_dst_inputs[i]);
+      multi_city_components.push_back(leg_date_btns[i]);
+      multi_city_components.push_back(leg_tab_btns[i]);
+    }
+    multi_city_components.push_back(add_leg_btn);
+    multi_city_components.push_back(remove_leg_btn);
+
     auto controls_container = Container::Vertical({
         Container::Horizontal({
+            trip_type_toggle,
+            preference_toggle,
+        }),
+        Container::Horizontal({
             source_input,
+            swap_btn,
+            dest_input,
+            dep_date_btn,
+            Maybe(ret_date_btn, [&] { return selected_trip_type == 0; }),
             search_btn,
         }),
         src_sugg_container,
-        dest_input,
         dst_sugg_container,
-        Container::Horizontal({
-            year_dropdown,
-            month_dropdown,
-            day_dropdown,
-            preference_toggle,
-        }),
+        Maybe(Container::Vertical(multi_city_components),
+              [&] { return selected_trip_type == 2; }),
+        Maybe(Container::Horizontal({
+                  tab_outbound_btn,
+                  tab_return_btn,
+              }),
+              [&] { return selected_trip_type == 0; }),
         filters_container,
         opt_buttons_container,
     });
@@ -1139,25 +1781,31 @@ public:
         jump_research_btn,
     });
 
-    int main_focus_idx = 1; // Start with focus on search controls
-    auto main_container = Container::Vertical({
-        top_header_buttons,
-        controls_container,
-        footer_controls,
-    }, &main_focus_idx);
+    int main_focus_idx = 1;
+    auto main_container = Container::Vertical(
+        {
+            top_header_buttons,
+            controls_container,
+            footer_controls,
+        },
+        &main_focus_idx);
 
     // Renderer lambda
     auto renderer = Renderer(main_container, [&] {
-      // Keep date synced live whenever dropdown changes
-      update_target_date_from_tool();
+      // Sync trip type changes
+      if (selected_trip_type != last_trip_type) {
+        last_trip_type = selected_trip_type;
+        update_date_btn_labels();
+        execute_search(show_research_mode);
+      }
 
-      // If preference changed from toggle
+      // Sync preference toggle
       if (selected_preference != last_preference) {
         last_preference = selected_preference;
         sync_selected_flight_from_preference();
       }
 
-      // Keep filters synced live
+      // Live filter sync
       apply_filters();
 
       // Update option button labels
@@ -1196,6 +1844,58 @@ public:
         }
       }
 
+      // Update Round-trip tab labels
+      if (!outbound_filtered.empty() &&
+          outbound_selected_idx < (int)outbound_filtered.size()) {
+        tab_outbound_label =
+            (active_roundtrip_tab == 0 ? " ▶ " : "   ") +
+            std::string("🛫 1. Departing: ") + source_str + " ➔ " + dest_str +
+            " ($" +
+            std::to_string(outbound_filtered[outbound_selected_idx].total_price) +
+            ") ";
+      } else {
+        tab_outbound_label =
+            (active_roundtrip_tab == 0 ? " ▶ " : "   ") +
+            std::string("🛫 1. Departing: ") + source_str + " ➔ " + dest_str +
+            " ";
+      }
+
+      if (!return_filtered.empty() &&
+          return_selected_idx < (int)return_filtered.size()) {
+        tab_return_label =
+            (active_roundtrip_tab == 1 ? " ▶ " : "   ") +
+            std::string("🛬 2. Returning: ") + dest_str + " ➔ " + source_str +
+            " ($" +
+            std::to_string(return_filtered[return_selected_idx].total_price) +
+            ") ";
+      } else {
+        tab_return_label =
+            (active_roundtrip_tab == 1 ? " ▶ " : "   ") +
+            std::string("🛬 2. Returning: ") + dest_str + " ➔ " + source_str +
+            " ";
+      }
+
+      // Update Multi-city tab labels
+      for (int i = 0; i < num_active_legs; ++i) {
+        std::string price_part = "";
+        if (!multi_city_legs[i].filtered.empty() &&
+            multi_city_legs[i].selected_idx <
+                (int)multi_city_legs[i].filtered.size()) {
+          price_part =
+              " ($" +
+              std::to_string(
+                  multi_city_legs[i]
+                      .filtered[multi_city_legs[i].selected_idx]
+                      .total_price) +
+              ")";
+        }
+        leg_tab_labels[i] =
+            (active_multi_leg_idx == i ? " ▶ " : "   ") +
+            std::string("Flight ") + std::to_string(i + 1) + ": " +
+            multi_city_legs[i].origin + " ➔ " + multi_city_legs[i].dest +
+            price_part + " ";
+      }
+
       // Live resolution preview next to input boxes
       std::string live_src_code =
           AirportSearch::resolve_airport_code(source_str, loader);
@@ -1229,152 +1929,251 @@ public:
       }
 
       // ---------------------------------------------------------------------
-      // FIXED TOP BAR (BRANDING + TOP-RIGHT RESEARCH MODE BUTTON + EXIT)
+      // TOP BRANDING BAR & UTILITY TOGGLES
       // ---------------------------------------------------------------------
       auto top_bar = hbox({
           vbox({
               text(" ✈️  FLIGHT ROUTE EXPLORER ") | bold |
                   color(Color::CyanLight),
               text(show_research_mode
-                       ? " Customer + Research Benchmark Mode Active "
-                       : " Customer Mode  (Click top-right button for Research "
-                         "Analytics) ") |
+                       ? " Customer Mode + Algorithmic Research Suite Active "
+                       : " Explore flights effortlessly with live prices, calendar & map ") |
                   dim,
           }),
           filler(),
           hbox({
               map_toggle_btn->Render() |
                   (show_world_map ? color(Color::CyanLight)
-                                  : color(Color::GrayLight)),
+                                  : color(Color::GrayLight)) |
+                  reflect(map_toggle_box),
               text(" "),
               research_toggle_btn->Render() |
                   (show_research_mode ? color(Color::GreenLight)
-                                      : color(Color::YellowLight)),
+                                      : color(Color::YellowLight)) |
+                  reflect(research_toggle_box),
               text(" "),
-              exit_btn->Render() | color(Color::RedLight),
+              exit_btn->Render() | color(Color::RedLight) | reflect(exit_box),
           }),
       });
 
       // ---------------------------------------------------------------------
-      // FIXED COMPACT SEARCH, DATE TOOL & FLIGHT PREFERENCE FORM
+      // TRIP TYPE & ROUTE PREFERENCES BAR
       // ---------------------------------------------------------------------
-      std::vector<Element> form_lines;
-
-      // Row 1: Origin Input, live resolution, and Search button
-      form_lines.push_back(hbox({
-          text(" Origin: ") | bold | vcenter,
-          source_input->Render() | size(WIDTH, EQUAL, 20) |
-              color(Color::White) | borderLight,
-          text(" " + origin_desc) |
-              color(origin_valid ? Color::GreenLight : Color::YellowLight) |
-              vcenter,
-          filler(),
-          search_btn->Render() | bold | color(Color::GreenLight),
-      }));
-
-      // Row 2: Live Origin suggestions (as user types)
-      if (!src_matches.empty()) {
-        std::vector<Element> s_items;
-        s_items.push_back(text("  ↳ Origin options: ") |
-                          color(Color::CyanLight) | dim | vcenter);
-        for (size_t i = 0; i < MAX_SUGGESTIONS; ++i) {
-          if (i < src_matches.size()) {
-            s_items.push_back(src_buttons[i]->Render());
-            s_items.push_back(text(" "));
-          }
-        }
-        form_lines.push_back(hbox(std::move(s_items)));
-      }
-
-      // Row 3: Destination Input, live resolution
-      form_lines.push_back(hbox({
-          text(" Dest:   ") | bold | vcenter,
-          dest_input->Render() | size(WIDTH, EQUAL, 20) | color(Color::White) |
-              borderLight,
-          text(" " + dest_desc) |
-              color(dest_valid ? Color::GreenLight : Color::YellowLight) |
-              vcenter,
-          filler(),
-      }));
-
-      // Row 4: Live Dest suggestions (as user types)
-      if (!dst_matches.empty()) {
-        std::vector<Element> d_items;
-        d_items.push_back(text("  ↳ Dest options:   ") |
-                          color(Color::YellowLight) | dim | vcenter);
-        for (size_t i = 0; i < MAX_SUGGESTIONS; ++i) {
-          if (i < dst_matches.size()) {
-            d_items.push_back(dst_buttons[i]->Render());
-            d_items.push_back(text(" "));
-          }
-        }
-        form_lines.push_back(hbox(std::move(d_items)));
-      }
-
-      // Row 5: Date Tool, Flight Preference Picker, Status Message
-      form_lines.push_back(hbox({
-          text(" Date: ") | bold | vcenter,
-          year_dropdown->Render() | size(WIDTH, EQUAL, 9),
-          text(" "),
-          month_dropdown->Render() | size(WIDTH, EQUAL, 13),
-          text(" "),
-          day_dropdown->Render() | size(WIDTH, EQUAL, 7),
-          text("   View: ") | bold | color(Color::YellowLight) | vcenter,
-          preference_toggle->Render() | color(Color::White) | vcenter,
+      auto trip_pref_bar = hbox({
+          text(" Trip: ") | bold | vcenter,
+          trip_type_toggle->Render() | color(Color::CyanLight) | vcenter |
+              reflect(trip_type_box),
+          text("   │   View: ") | bold | color(Color::YellowLight) | vcenter,
+          preference_toggle->Render() | color(Color::White) | vcenter |
+              reflect(preference_box),
           filler(),
           text(status_message + " ") | vcenter |
               (has_results ? color(Color::Green) : color(Color::RedLight)),
-      }));
+      });
 
-      auto form_window = window(
-          text(" SEARCH & FLIGHT PREFERENCES ") | bold | color(Color::CyanLight),
-          vbox(std::move(form_lines))) |
+      // ---------------------------------------------------------------------
+      // SEARCH CAPSULE
+      // ---------------------------------------------------------------------
+      std::vector<Element> capsule_elements;
+
+      if (selected_trip_type == 0) { // Round-trip
+        capsule_elements.push_back(hbox({
+            text(" 🛫 Where from? ") | bold | vcenter,
+            source_input->Render() | size(WIDTH, EQUAL, 18) | borderLight |
+                color(source_input->Focused() ? Color::CyanLight : Color::White) |
+                reflect(src_input_box),
+            text(" "),
+            swap_btn->Render() | color(Color::CyanLight) | vcenter |
+                reflect(swap_box),
+            text(" "),
+            text(" 🛬 Where to? ") | bold | vcenter,
+            dest_input->Render() | size(WIDTH, EQUAL, 18) | borderLight |
+                color(dest_input->Focused() ? Color::CyanLight : Color::White) |
+                reflect(dst_input_box),
+            text("   │  ") | dim | vcenter,
+            dep_date_btn->Render() | bold | color(Color::CyanLight) | vcenter |
+                reflect(dep_date_box),
+            text(" "),
+            ret_date_btn->Render() | bold | color(Color::YellowLight) |
+                vcenter | reflect(ret_date_box),
+            filler(),
+            search_btn->Render() | bold | color(Color::GreenLight) | vcenter |
+                reflect(search_box),
+        }));
+
+        // Live city/code resolution
+        capsule_elements.push_back(hbox({
+            text("      " + origin_desc) |
+                color(origin_valid ? Color::GreenLight : Color::YellowLight) |
+                dim,
+            filler(),
+            text(dest_desc + "      ") |
+                color(dest_valid ? Color::GreenLight : Color::YellowLight) |
+                dim,
+            filler(),
+        }));
+
+      } else if (selected_trip_type == 1) { // One-way
+        capsule_elements.push_back(hbox({
+            text(" 🛫 Where from? ") | bold | vcenter,
+            source_input->Render() | size(WIDTH, EQUAL, 20) | borderLight |
+                color(source_input->Focused() ? Color::CyanLight : Color::White) |
+                reflect(src_input_box),
+            text(" "),
+            swap_btn->Render() | color(Color::CyanLight) | vcenter |
+                reflect(swap_box),
+            text(" "),
+            text(" 🛬 Where to? ") | bold | vcenter,
+            dest_input->Render() | size(WIDTH, EQUAL, 20) | borderLight |
+                color(dest_input->Focused() ? Color::CyanLight : Color::White) |
+                reflect(dst_input_box),
+            text("   │  ") | dim | vcenter,
+            dep_date_btn->Render() | bold | color(Color::CyanLight) | vcenter |
+                reflect(dep_date_box),
+            filler(),
+            search_btn->Render() | bold | color(Color::GreenLight) | vcenter |
+                reflect(search_box),
+        }));
+
+        capsule_elements.push_back(hbox({
+            text("      " + origin_desc) |
+                color(origin_valid ? Color::GreenLight : Color::YellowLight) |
+                dim,
+            filler(),
+            text(dest_desc + "      ") |
+                color(dest_valid ? Color::GreenLight : Color::YellowLight) |
+                dim,
+            filler(),
+        }));
+
+      } else { // Multi-city
+        for (int i = 0; i < num_active_legs; ++i) {
+          capsule_elements.push_back(hbox({
+              text(" Flight " + std::to_string(i + 1) + ": ") | bold |
+                  color(Color::CyanLight) | vcenter,
+              text(" 🛫 ") | vcenter,
+              leg_src_inputs[i]->Render() | size(WIDTH, EQUAL, 16) |
+                  borderLight |
+                  color(leg_src_inputs[i]->Focused() ? Color::CyanLight
+                                                     : Color::White) |
+                  reflect(leg_src_boxes[i]),
+              text(" ➔ 🛬 ") | dim | vcenter,
+              leg_dst_inputs[i]->Render() | size(WIDTH, EQUAL, 16) |
+                  borderLight |
+                  color(leg_dst_inputs[i]->Focused() ? Color::CyanLight
+                                                     : Color::White) |
+                  reflect(leg_dst_boxes[i]),
+              text("   │  ") | dim | vcenter,
+              leg_date_btns[i]->Render() | bold | color(Color::YellowLight) |
+                  vcenter | reflect(leg_date_boxes[i]),
+              filler(),
+          }));
+        }
+
+        capsule_elements.push_back(hbox({
+            add_leg_btn->Render() | color(Color::CyanLight) |
+                reflect(add_leg_box),
+            text(" "),
+            remove_leg_btn->Render() | color(Color::RedLight) |
+                reflect(remove_leg_box),
+            filler(),
+            search_btn->Render() | bold | color(Color::GreenLight) |
+                reflect(search_box),
+        }));
+      }
+
+      // Suggestions row (if any)
+      if (selected_trip_type != 2) {
+        if (!src_matches.empty() || !dst_matches.empty()) {
+          std::vector<Element> sugg_items;
+          if (!src_matches.empty()) {
+            sugg_items.push_back(text(" Origin: ") | dim | vcenter);
+            for (size_t i = 0; i < MAX_SUGGESTIONS; ++i) {
+              if (i < src_matches.size()) {
+                sugg_items.push_back(src_buttons[i]->Render() |
+                                     reflect(src_sugg_boxes[i]));
+                sugg_items.push_back(text(" "));
+              }
+            }
+          }
+          if (!dst_matches.empty()) {
+            sugg_items.push_back(text("  Dest: ") | dim | vcenter);
+            for (size_t i = 0; i < MAX_SUGGESTIONS; ++i) {
+              if (i < dst_matches.size()) {
+                sugg_items.push_back(dst_buttons[i]->Render() |
+                                     reflect(dst_sugg_boxes[i]));
+                sugg_items.push_back(text(" "));
+              }
+            }
+          }
+          capsule_elements.push_back(separatorLight());
+          capsule_elements.push_back(hbox(std::move(sugg_items)));
+        }
+      }
+
+      auto search_capsule_window = window(
+          text(" 🔍 SEARCH FLIGHTS ") | bold | color(Color::CyanLight),
+          vbox(std::move(capsule_elements))) |
           color(Color::Cyan);
 
       // ---------------------------------------------------------------------
-      // FIXED COMPACT TYPED FLIGHT NEEDS FILTER BAR
+      // TYPED FLIGHT NEEDS FILTER BAR
       // ---------------------------------------------------------------------
-      bool has_active_filter = active_spec.has_any_filter() || !typed_filter_str.empty();
+      bool has_active_filter =
+          active_spec.has_any_filter() || !typed_filter_str.empty();
 
       std::string filter_badge =
           has_active_filter
               ? ("🔍 " + std::to_string(filtered_itineraries.size()) + "/" +
                  std::to_string(all_candidates.size()) + " match needs")
-              : ("✈ All " + std::to_string(all_candidates.size()) + " flights shown");
+              : ("✈ All " + std::to_string(all_candidates.size()) +
+                 " flights shown");
 
-      // Build live badge elements for recognized criteria
       std::vector<Element> parsed_badges;
       if (active_spec.max_stops == 0) {
-        parsed_badges.push_back(text("[ 🛑 Non-stop ]") | bold | color(Color::GreenLight));
+        parsed_badges.push_back(
+            text("[ 🛑 Non-stop ]") | bold | color(Color::GreenLight));
         parsed_badges.push_back(text(" "));
       } else if (active_spec.max_stops == 1) {
-        parsed_badges.push_back(text("[ 🛑 ≤ 1 Stop ]") | bold | color(Color::YellowLight));
+        parsed_badges.push_back(
+            text("[ 🛑 ≤ 1 Stop ]") | bold | color(Color::YellowLight));
         parsed_badges.push_back(text(" "));
       } else if (active_spec.max_stops == 2) {
-        parsed_badges.push_back(text("[ 🛑 ≤ 2 Stops ]") | bold | color(Color::YellowLight));
+        parsed_badges.push_back(
+            text("[ 🛑 ≤ 2 Stops ]") | bold | color(Color::YellowLight));
         parsed_badges.push_back(text(" "));
       }
 
       if (active_spec.max_price != -1) {
-        parsed_badges.push_back(text("[ 🏷️ Max $" + std::to_string(active_spec.max_price) + " ]") | bold | color(Color::YellowLight));
+        parsed_badges.push_back(
+            text("[ 🏷️ Max $" + std::to_string(active_spec.max_price) + " ]") |
+            bold | color(Color::YellowLight));
         parsed_badges.push_back(text(" "));
       }
 
       if (!active_spec.target_airline_code.empty()) {
-        std::string air_label = active_spec.target_airline_name.empty() ? active_spec.target_airline_code : active_spec.target_airline_name;
-        if (air_label.size() > 14) air_label = air_label.substr(0, 13) + "…";
-        parsed_badges.push_back(text("[ ✈ " + air_label + " ]") | bold | color(Color::CyanLight));
+        std::string air_label = active_spec.target_airline_name.empty()
+                                    ? active_spec.target_airline_code
+                                    : active_spec.target_airline_name;
+        if (air_label.size() > 14)
+          air_label = air_label.substr(0, 13) + "…";
+        parsed_badges.push_back(
+            text("[ ✈ " + air_label + " ]") | bold | color(Color::CyanLight));
         parsed_badges.push_back(text(" "));
       }
 
       if (!active_spec.dep_time_label.empty()) {
-        parsed_badges.push_back(text("[ 🌅 " + active_spec.dep_time_label + " ]") | bold | color(Color::YellowLight));
+        parsed_badges.push_back(
+            text("[ 🌅 " + active_spec.dep_time_label + " ]") | bold |
+            color(Color::YellowLight));
         parsed_badges.push_back(text(" "));
       }
 
       if (active_spec.max_duration_mins != -1) {
         int hrs = active_spec.max_duration_mins / 60;
-        parsed_badges.push_back(text("[ ⏱ Under " + std::to_string(hrs) + "h ]") | bold | color(Color::MagentaLight));
+        parsed_badges.push_back(
+            text("[ ⏱ Under " + std::to_string(hrs) + "h ]") | bold |
+            color(Color::MagentaLight));
         parsed_badges.push_back(text(" "));
       }
 
@@ -1385,9 +2184,13 @@ public:
             hbox(std::move(parsed_badges)) | vcenter,
         });
       } else if (!typed_filter_str.empty()) {
-        badges_row = text("  ℹ️  No specific flight criteria recognized in '" + typed_filter_str + "'. Showing all flights.") | dim | color(Color::YellowLight);
+        badges_row = text("  ℹ️  No specific flight criteria recognized in '" +
+                          typed_filter_str + "'. Showing all flights.") |
+                     dim | color(Color::YellowLight);
       } else {
-        badges_row = text("  💡 Tip: Type your needs (e.g. 'non-stop', 'under $800', 'Emirates', 'morning', '< 24h') or click a chip below") | dim;
+        badges_row = text("  💡 Tip: Type your needs (e.g. 'non-stop', 'under "
+                          "$800', 'Emirates', 'morning', '< 24h') or click a chip") |
+                     dim;
       }
 
       auto filters_window = window(
@@ -1404,45 +2207,216 @@ public:
           vbox({
               hbox({
                   text(" Your Needs: ") | bold | vcenter,
-                  filter_input->Render() | size(WIDTH, EQUAL, 52) | color(Color::White) | borderLight,
+                  filter_input->Render() | size(WIDTH, EQUAL, 52) |
+                      borderLight |
+                      color(filter_input->Focused() ? Color::CyanLight
+                                                    : Color::White) |
+                      reflect(filter_input_box),
                   text(" "),
                   clear_filter_btn->Render() |
                       (has_active_filter ? color(Color::RedLight)
-                                         : color(Color::GrayLight)),
+                                         : color(Color::GrayLight)) |
+                      reflect(clear_filter_box),
                   filler(),
               }),
               badges_row,
               hbox({
                   text(" Quick Needs: ") | dim | vcenter,
-                  chip_nonstop->Render(),
+                  chip_nonstop->Render() | reflect(chip_boxes[0]),
                   text(" "),
-                  chip_1stop->Render(),
+                  chip_1stop->Render() | reflect(chip_boxes[1]),
                   text(" "),
-                  chip_p800->Render(),
+                  chip_p800->Render() | reflect(chip_boxes[2]),
                   text(" "),
-                  chip_p1000->Render(),
+                  chip_p1000->Render() | reflect(chip_boxes[3]),
                   text(" "),
-                  chip_morning->Render(),
+                  chip_morning->Render() | reflect(chip_boxes[4]),
                   text(" "),
-                  chip_dur24->Render(),
+                  chip_dur24->Render() | reflect(chip_boxes[5]),
                   filler(),
               }),
           })) |
           color(has_active_filter ? Color::Yellow : Color::Cyan);
 
       // ---------------------------------------------------------------------
-      // SCROLLABLE BODY: CUSTOMER SECTION + (OPTIONAL) RESEARCH SECTION
+      // SCROLLABLE BODY: CUSTOMER RESULTS + RESEARCH SECTION
       // ---------------------------------------------------------------------
       std::vector<Element> customer_elements;
       std::vector<Element> research_elements;
 
       if (has_results) {
+        // A. Combined Itinerary Banner & Tabs (Google Flights Experience)
+        if (selected_trip_type == 0) { // Round-trip
+          int total_rt_price = 0;
+          int total_rt_duration = 0;
+          if (!outbound_filtered.empty() &&
+              outbound_selected_idx < (int)outbound_filtered.size()) {
+            total_rt_price +=
+                outbound_filtered[outbound_selected_idx].total_price;
+            total_rt_duration +=
+                outbound_filtered[outbound_selected_idx].total_time_mins;
+          }
+          if (!return_filtered.empty() &&
+              return_selected_idx < (int)return_filtered.size()) {
+            total_rt_price +=
+                return_filtered[return_selected_idx].total_price;
+            total_rt_duration +=
+                return_filtered[return_selected_idx].total_time_mins;
+          }
+
+          customer_elements.push_back(
+              window(
+                  hbox({
+                      text(" ✈️  ROUND-TRIP ITINERARY SUMMARY ") | bold |
+                          color(Color::CyanLight),
+                      filler(),
+                      text(" Total Combined Fare: ") | bold,
+                      text("$" + std::to_string(total_rt_price)) | bold |
+                          color(Color::GreenLight),
+                      text("  (" +
+                           TUIViews::format_duration(total_rt_duration) + ")") |
+                          dim,
+                  }),
+                  vbox({
+                      hbox({
+                          text(" 🛫 Outbound (" + dep_date_str + "): ") | bold |
+                              color(Color::CyanLight),
+                          text((!outbound_filtered.empty() &&
+                                outbound_selected_idx <
+                                    (int)outbound_filtered.size())
+                                   ? TUIViews::build_route_summary(
+                                         outbound_filtered
+                                             [outbound_selected_idx],
+                                         loader, active_source_id)
+                                   : "None"),
+                          filler(),
+                          text((!outbound_filtered.empty() &&
+                                outbound_selected_idx <
+                                    (int)outbound_filtered.size())
+                                   ? ("$" +
+                                      std::to_string(
+                                          outbound_filtered
+                                              [outbound_selected_idx]
+                                                  .total_price))
+                                   : ""),
+                      }),
+                      separatorLight(),
+                      hbox({
+                          text(" 🛬 Return (" + ret_date_str + "): ") | bold |
+                              color(Color::YellowLight),
+                          text((!return_filtered.empty() &&
+                                return_selected_idx <
+                                    (int)return_filtered.size())
+                                   ? TUIViews::build_route_summary(
+                                         return_filtered[return_selected_idx],
+                                         loader, return_source_id)
+                                   : "None"),
+                          filler(),
+                          text((!return_filtered.empty() &&
+                                return_selected_idx <
+                                    (int)return_filtered.size())
+                                   ? ("$" +
+                                      std::to_string(
+                                          return_filtered[return_selected_idx]
+                                              .total_price))
+                                   : ""),
+                      }),
+                  })) |
+              color(Color::Cyan));
+
+          // Leg Switcher Tabs
+          customer_elements.push_back(hbox({
+              tab_outbound_btn->Render() |
+                  (active_roundtrip_tab == 0
+                       ? (bold | color(Color::GreenLight) | inverted)
+                       : color(Color::CyanLight)) |
+                  reflect(tab_outbound_box),
+              text("  "),
+              tab_return_btn->Render() |
+                  (active_roundtrip_tab == 1
+                       ? (bold | color(Color::GreenLight) | inverted)
+                       : color(Color::CyanLight)) |
+                  reflect(tab_return_box),
+              filler(),
+          }));
+
+        } else if (selected_trip_type == 2) { // Multi-city
+          int total_mc_price = 0;
+          for (int i = 0; i < num_active_legs; ++i) {
+            if (!multi_city_legs[i].filtered.empty() &&
+                multi_city_legs[i].selected_idx <
+                    (int)multi_city_legs[i].filtered.size()) {
+              total_mc_price += multi_city_legs[i]
+                                    .filtered[multi_city_legs[i].selected_idx]
+                                    .total_price;
+            }
+          }
+
+          std::vector<Element> leg_rows;
+          for (int i = 0; i < num_active_legs; ++i) {
+            std::string summary = "None";
+            std::string price = "";
+            if (!multi_city_legs[i].filtered.empty() &&
+                multi_city_legs[i].selected_idx <
+                    (int)multi_city_legs[i].filtered.size()) {
+              summary = TUIViews::build_route_summary(
+                  multi_city_legs[i]
+                      .filtered[multi_city_legs[i].selected_idx],
+                  loader, multi_city_legs[i].src_id);
+              price =
+                  "$" +
+                  std::to_string(
+                      multi_city_legs[i]
+                          .filtered[multi_city_legs[i].selected_idx]
+                          .total_price);
+            }
+            if (i > 0)
+              leg_rows.push_back(separatorLight());
+            leg_rows.push_back(hbox({
+                text(" Flight " + std::to_string(i + 1) + " (" +
+                     multi_city_legs[i].date_str + "): ") |
+                    bold | color(Color::CyanLight),
+                text(summary),
+                filler(),
+                text(price) | bold | color(Color::YellowLight),
+            }));
+          }
+
+          customer_elements.push_back(
+              window(
+                  hbox({
+                      text(" 🔀 MULTI-CITY TRIP SUMMARY (" +
+                           std::to_string(num_active_legs) + " FLIGHTS) ") |
+                          bold | color(Color::CyanLight),
+                      filler(),
+                      text(" Combined Total Fare: ") | bold,
+                      text("$" + std::to_string(total_mc_price)) | bold |
+                          color(Color::GreenLight),
+                  }),
+                  vbox(std::move(leg_rows))) |
+              color(Color::Cyan));
+
+          // Multi-city Leg Switcher Tabs
+          std::vector<Element> tabs;
+          for (int i = 0; i < num_active_legs; ++i) {
+            tabs.push_back(
+                leg_tab_btns[i]->Render() |
+                (active_multi_leg_idx == i
+                     ? (bold | color(Color::GreenLight) | inverted)
+                     : color(Color::CyanLight)) |
+                reflect(leg_tab_boxes[i]));
+            tabs.push_back(text("  "));
+          }
+          tabs.push_back(filler());
+          customer_elements.push_back(hbox(std::move(tabs)));
+        }
+
+        // B. Active Leg Itinerary Card & World Map
         if (!filtered_itineraries.empty()) {
           std::string best_key = serialize_path_key(best_flight.path);
           std::string cheap_key = serialize_path_key(cheapest_flight.path);
           std::string fast_key = serialize_path_key(fastest_flight.path);
 
-          // 1. Dedicated Selected Flight Details Space (Immediately visible!)
           RoutingResult chosen_flight;
           if (selected_flight_idx >= 0 &&
               selected_flight_idx < (int)filtered_itineraries.size()) {
@@ -1473,39 +2447,40 @@ public:
                              " SELECTED)";
               chosen_reason = best_reason;
               chosen_color = Color::GreenLight;
-            } else if (pkey == cheap_key) {
-              chosen_title = "🏷️  CHEAPEST FLIGHT ITINERARY (OPTION #" +
-                             std::to_string(selected_flight_idx + 1) +
-                             " SELECTED)";
-              chosen_reason = "Lowest ticket fare available on the network.";
-              chosen_color = Color::YellowLight;
-            } else if (pkey == fast_key) {
-              chosen_title = "⚡ FASTEST FLIGHT ITINERARY (OPTION #" +
-                             std::to_string(selected_flight_idx + 1) +
-                             " SELECTED)";
-              chosen_reason = "Absolute minimum elapsed travel duration.";
-              chosen_color = Color::MagentaLight;
             } else {
               chosen_title = "✈ SELECTED FLIGHT ITINERARY — OPTION #" +
                              std::to_string(selected_flight_idx + 1) + " OF " +
                              std::to_string(filtered_itineraries.size());
-              chosen_reason = "Selected custom flight choice. Full leg-by-leg "
-                              "schedule breakdown below.";
+              chosen_reason =
+                  "Selected custom flight choice. Full leg-by-leg schedule "
+                  "breakdown below.";
               chosen_color = Color::CyanLight;
             }
 
             customer_elements.push_back(TUIViews::build_itinerary_card(
                 chosen_title, chosen_flight, chosen_reason, loader,
-                active_source_id, chosen_color, chosen_color, true));
+                (selected_trip_type == 0 && active_roundtrip_tab == 1)
+                    ? return_source_id
+                    : (selected_trip_type == 2 &&
+                       active_multi_leg_idx < num_active_legs)
+                          ? multi_city_legs[active_multi_leg_idx].src_id
+                          : active_source_id,
+                chosen_color, chosen_color, true));
 
             if (show_world_map) {
               customer_elements.push_back(
                   FlightPlanner::TUI::WorldMap::build_route_map(
-                      chosen_flight, loader, active_source_id));
+                      chosen_flight, loader,
+                      (selected_trip_type == 0 && active_roundtrip_tab == 1)
+                          ? return_source_id
+                          : (selected_trip_type == 2 &&
+                             active_multi_leg_idx < num_active_legs)
+                                ? multi_city_legs[active_multi_leg_idx].src_id
+                                : active_source_id));
             }
           }
 
-          // 2. Quick Summary Comparison Cards (Cheapest & Fastest)
+          // C. Summary Comparison Cards (Cheapest & Fastest)
           std::vector<Element> summary_cards;
           if (cheapest_flight.success) {
             summary_cards.push_back(
@@ -1533,9 +2508,13 @@ public:
                                 color(Color::White),
                         }),
                         separatorLight(),
-                        text(" Route: " + TUIViews::build_route_summary(
-                                              cheapest_flight, loader,
-                                              active_source_id)) |
+                        text(" Route: " +
+                             TUIViews::build_route_summary(
+                                 cheapest_flight, loader,
+                                 (selected_trip_type == 0 &&
+                                  active_roundtrip_tab == 1)
+                                     ? return_source_id
+                                     : active_source_id)) |
                             color(Color::GrayLight),
                     })) |
                 color(Color::Yellow) | flex | reflect(cheapest_summary_box));
@@ -1567,9 +2546,13 @@ public:
                                 color(Color::White),
                         }),
                         separatorLight(),
-                        text(" Route: " + TUIViews::build_route_summary(
-                                              fastest_flight, loader,
-                                              active_source_id)) |
+                        text(" Route: " +
+                             TUIViews::build_route_summary(
+                                 fastest_flight, loader,
+                                 (selected_trip_type == 0 &&
+                                  active_roundtrip_tab == 1)
+                                     ? return_source_id
+                                     : active_source_id)) |
                             color(Color::GrayLight),
                     })) |
                 color(Color::MagentaLight) | flex |
@@ -1580,7 +2563,7 @@ public:
             customer_elements.push_back(hbox(std::move(summary_cards)));
           }
 
-          // 3. Clickable Flight Options List Window
+          // D. Clickable Flight Options List
           std::vector<Element> option_rows;
           if (option_boxes.size() < filtered_itineraries.size()) {
             option_boxes.resize(filtered_itineraries.size());
@@ -1613,8 +2596,11 @@ public:
                     : (std::to_string(res.path.size() - 1) +
                        (res.path.size() == 2 ? " Stop " : " Stops"));
 
-            std::string route_str =
-                TUIViews::build_route_summary(res, loader, active_source_id);
+            std::string route_str = TUIViews::build_route_summary(
+                res, loader,
+                (selected_trip_type == 0 && active_roundtrip_tab == 1)
+                    ? return_source_id
+                    : active_source_id);
 
             std::string airlines_str;
             std::set<std::string> leg_airlines;
@@ -1676,34 +2662,56 @@ public:
                   hbox({
                       text(" ✈ ALL FLIGHT OPTIONS (" +
                            std::to_string(filtered_itineraries.size()) +
-                           " Available — Click any option to view full details) ") |
+                           " Available — Click any option to select) ") |
                           bold | color(Color::CyanLight),
                       filler(),
-                      text(" Click any option to inspect ") | dim,
+                      text(" Click option to inspect ") | dim,
                   }),
                   vbox(std::move(option_rows))) |
               color(Color::Cyan));
+        } else if (selected_trip_type == 0 && active_roundtrip_tab == 1 &&
+                   !outbound_filtered.empty()) {
+          customer_elements.push_back(
+              window(
+                  text(" ⚠️  NO RETURN FLIGHTS AVAILABLE AFTER OUTBOUND ARRIVAL ") |
+                      bold | color(Color::YellowLight),
+                  vbox({
+                      text(" No valid return flights depart on or after " +
+                           ret_date_str +
+                           " following your selected ongoing flight arrival.") |
+                          color(Color::White),
+                      text(" Return flights cannot depart earlier than your "
+                           "ongoing flight lands (+ transfer time).") |
+                          color(Color::YellowLight),
+                      text(" "),
+                      text(" Tip: Click the Return Date button above to choose "
+                           "a later date, or pick an earlier ongoing flight.") |
+                          color(Color::GrayLight),
+                  })) |
+              color(Color::YellowLight));
         } else {
-        customer_elements.push_back(
-            window(
-                text(" ⚠️  NO FLIGHTS MATCH CURRENT FILTERS ") | bold |
-                    color(Color::YellowLight),
-                vbox({
-                    text(" None of the " +
-                         std::to_string(all_candidates.size()) +
-                         " available itineraries match your active filter criteria:") |
-                        color(Color::White),
-                    text("   • " + get_active_filters_description()) |
-                        color(Color::YellowLight) | bold,
-                    text(" "),
-                    text(" Tip: Click [ ↺ Clear ] on the filter bar above or edit your needs.") |
-                        color(Color::GrayLight),
-                })) |
-            color(Color::YellowLight));
+          customer_elements.push_back(
+              window(
+                  text(" ⚠️  NO FLIGHTS MATCH CURRENT FILTERS ") | bold |
+                      color(Color::YellowLight),
+                  vbox({
+                      text(" None of the " +
+                           std::to_string(all_candidates.size()) +
+                           " available itineraries match your active filter "
+                           "criteria:") |
+                          color(Color::White),
+                      text("   • " + get_active_filters_description()) |
+                          color(Color::YellowLight) | bold,
+                      text(" "),
+                      text(" Tip: Click [ ↺ Clear ] on the filter bar above or "
+                           "edit your needs.") |
+                          color(Color::GrayLight),
+                  })) |
+              color(Color::YellowLight));
         }
 
         // ===================================================================
-        // RESEARCHER MODE SECTION (REVEALED AT THE BOTTOM WHEN TOGGLED ON)
+        // RESEARCHER MODE SECTION
         // ===================================================================
         if (show_research_mode && !researcher_benchmarks.empty()) {
           research_elements.push_back(text(" "));
@@ -1715,7 +2723,6 @@ public:
               }) |
               center);
 
-          // 1. Compact-Width FTXUI Benchmark Table
           std::vector<std::vector<std::string>> table_data;
           table_data.push_back(
               {"Algorithm", "Mode", "Time", "Nodes", "Edges", "Price", "Dur."});
@@ -1787,171 +2794,38 @@ public:
                      ftx_table.Render() | hcenter) |
               color(Color::GreenLight));
 
-          // 2. Geographic Route Trajectory on World Map
-          if (show_world_map && best_flight.success) {
-            research_elements.push_back(
-                FlightPlanner::TUI::WorldMap::build_route_map(
-                    best_flight, loader, active_source_id));
-          }
-
-          // 3. Visual Speed Profiler Gauges
+          // Visual Speed Profiler Gauges
           std::vector<Element> visual_gauges;
           for (const auto &bench : researcher_benchmarks) {
             float ratio = (max_time_us > 0)
-                              ? (float)bench.compute_time_us / (float)max_time_us
+                              ? float(bench.compute_time_us) / float(max_time_us)
                               : 0.0f;
-            if (ratio < 0.02f)
-              ratio = 0.02f;
+            ratio = std::clamp(ratio, 0.01f, 1.0f);
 
-            std::string label = bench.algo_name + " [" + bench.mode_label + "]";
-            if (label.size() < 26)
-              label += std::string(26 - label.size(), ' ');
-            else
-              label = label.substr(0, 26);
-
-            std::string time_str;
-            if (bench.compute_time_us >= 1000000) {
-              std::ostringstream oss;
-              oss << std::fixed << std::setprecision(2)
-                  << (bench.compute_time_us / 1000000.0) << " s";
-              time_str = oss.str();
-            } else {
-              std::ostringstream oss;
-              oss << std::fixed << std::setprecision(2)
-                  << (bench.compute_time_us / 1000.0) << " ms";
-              time_str = oss.str();
-            }
-
+            std::string label = bench.algo_name + " (" + bench.mode_label + ")";
             visual_gauges.push_back(hbox({
-                text(" " + label) | color(Color::GrayLight),
-                gauge(ratio) | color(Color::Cyan) | flex,
-                text(" " + time_str) | bold | color(Color::GreenLight) |
-                    size(WIDTH, EQUAL, 11),
+                text(label) | size(WIDTH, EQUAL, 24) |
+                    color(bench.mode_label == "cheapest" ? Color::YellowLight
+                                                         : Color::MagentaLight),
+                gauge(ratio) | flex |
+                    color(ratio > 0.7f   ? Color::RedLight
+                          : ratio > 0.3f ? Color::YellowLight
+                                         : Color::GreenLight),
+                text(" " +
+                     (bench.compute_time_us < 1000
+                          ? (std::to_string(bench.compute_time_us) + " µs")
+                          : (std::to_string(bench.compute_time_us / 1000) +
+                             " ms"))) |
+                    bold | size(WIDTH, EQUAL, 10),
             }));
           }
 
           research_elements.push_back(
-              window(text(" VISUAL RUNTIME PROFILER (RELATIVE SPEED) ") | bold |
+              window(text(" COMPUTATION RUNTIME SPEED PROFILER ") | bold |
                          color(Color::YellowLight),
                      vbox(std::move(visual_gauges))) |
               color(Color::YellowLight));
 
-          // 3. Yen's K-SP & Economic Analysis
-          if (best_flight.success) {
-            std::ostringstream oss_rec;
-            oss_rec << " Recommended: $" << best_flight.total_price << " ("
-                    << TUIViews::format_duration(best_flight.total_time_mins)
-                    << ", "
-                    << (best_flight.path.empty() ? 0
-                                                 : best_flight.path.size() - 1)
-                    << " transits) | " << best_reason;
-
-            std::ostringstream oss_gen;
-            oss_gen << " Generalized Economic Cost: $" << std::fixed
-                    << std::setprecision(2) << best_gen_cost
-                    << " (Value of Time: $25.00/hr, Layover Penalty: $15/stop)";
-
-            std::vector<Element> yen_rows;
-            yen_rows.push_back(text(oss_rec.str()) | bold |
-                               color(Color::GreenLight));
-            yen_rows.push_back(text(oss_gen.str()) | color(Color::YellowLight));
-            yen_rows.push_back(separatorLight());
-
-            for (size_t i = 0; i < yen_k_paths.size(); ++i) {
-              const auto &res = yen_k_paths[i];
-              yen_rows.push_back(hbox({
-                  text(" Alt #" + std::to_string(i + 1) + ": ") | bold |
-                      color(Color::White),
-                  text("$" + std::to_string(res.total_price)) | bold |
-                      color(Color::Yellow),
-                  text(" │ " + TUIViews::format_duration(res.total_time_mins)) |
-                      color(Color::CyanLight),
-                  text(" │ " + std::to_string(res.path.size() - 1) + " stops") |
-                      color(Color::GrayLight),
-                  text(" │ " + TUIViews::build_route_summary(
-                                   res, loader, active_source_id)) |
-                      color(Color::White),
-              }));
-            }
-
-            research_elements.push_back(
-                window(text(" YEN'S K-SP & ECONOMIC TRADE-OFF ANALYSIS ") |
-                           bold | color(Color::MagentaLight),
-                       vbox(std::move(yen_rows))) |
-                color(Color::MagentaLight));
-          }
-
-          // 4. Algorithm Consensus Equivalence Groups
-          {
-            struct ConsensusGroup {
-              RoutingResult res;
-              std::vector<std::string> algos;
-            };
-            std::vector<std::string> order;
-            std::unordered_map<std::string, ConsensusGroup> groups;
-
-            for (const auto &bench : researcher_benchmarks) {
-              if (!bench.result.success)
-                continue;
-              std::string key = serialize_path_key(bench.result.path);
-              if (groups.find(key) == groups.end()) {
-                order.push_back(key);
-                groups[key] = {bench.result, {}};
-              }
-              groups[key].algos.push_back(bench.algo_name + "[" +
-                                          bench.mode_label + "]");
-            }
-
-            std::vector<Element> cons_rows;
-            for (size_t g = 0; g < order.size(); ++g) {
-              const auto &grp = groups[order[g]];
-              std::string route_s = TUIViews::build_route_summary(
-                  grp.res, loader, active_source_id);
-
-              // Wrap matched algorithms into fixed-width text lines so
-              // ComputeRequirement().min_y reports exact row count
-              std::vector<Element> group_lines;
-              group_lines.push_back(hbox({
-                  text(" Route Group #" + std::to_string(g + 1) + ": ") | bold |
-                      color(Color::CyanLight),
-                  text("$" + std::to_string(grp.res.total_price)) | bold |
-                      color(Color::Yellow),
-                  text(" │ " +
-                       TUIViews::format_duration(grp.res.total_time_mins)) |
-                      color(Color::GreenLight),
-                  text(" │ " + route_s) | color(Color::White),
-              }));
-
-              std::string curr_line = "   Matched by: ";
-              for (size_t a = 0; a < grp.algos.size(); ++a) {
-                std::string token = (a > 0 ? ", " : "") + grp.algos[a];
-                if (curr_line.size() + token.size() > 92 &&
-                    curr_line.size() > 16) {
-                  group_lines.push_back(text(curr_line) |
-                                        color(Color::GrayLight));
-                  curr_line = "               " + grp.algos[a];
-                } else {
-                  curr_line += token;
-                }
-              }
-              if (!curr_line.empty()) {
-                group_lines.push_back(text(curr_line) |
-                                      color(Color::GrayLight));
-              }
-              if (g + 1 < order.size()) {
-                group_lines.push_back(separatorLight());
-              }
-              cons_rows.push_back(vbox(std::move(group_lines)));
-            }
-
-            research_elements.push_back(
-                window(text(" ALGORITHM CONSENSUS GROUPS ") | bold |
-                           color(Color::Cyan),
-                       vbox(std::move(cons_rows))) |
-                color(Color::Cyan));
-          }
-
-          // Bottom padding so last row is clearly visible
           research_elements.push_back(
               text(" ─── End of Research Report ─── ") | dim | hcenter);
         }
@@ -1966,7 +2840,8 @@ public:
             window(text(" NO ROUTES FOUND ") | bold | color(Color::RedLight),
                    vbox({
                        text(" No scheduled flight connections found for " +
-                            source_str + " ➔ " + dest_str + " on " + target_date_str) |
+                            source_str + " ➔ " + dest_str + " on " +
+                            dep_date_str) |
                            color(Color::White),
                        text(" Tip: Try adjusting the travel date or airport code.") |
                            color(Color::GrayLight),
@@ -1988,9 +2863,6 @@ public:
       scroll_content->ComputeRequirement();
       content_height_ = scroll_content->requirement().min_y;
 
-      // Exact zero-dead-zone focus positioning for yframe:
-      // Frame::SetBox computes dy = target_y - external_dimy / 2.
-      // Setting target_y = scroll_line + external_dimy / 2 gives dy == scroll_line!
       int ext_dimy = get_external_dimy();
       int target_focus_y = scroll_line + ext_dimy / 2;
 
@@ -2010,24 +2882,31 @@ public:
       int pct = (max_sc > 0) ? (clamped_sc * 100 / max_sc) : 100;
 
       auto footer_bar = hbox({
-          scroll_top_btn->Render() | color(Color::CyanLight),
+          scroll_top_btn->Render() | color(Color::CyanLight) |
+              reflect(footer_boxes[0]),
           text(" "),
-          scroll_up_btn->Render() | color(Color::CyanLight),
+          scroll_up_btn->Render() | color(Color::CyanLight) |
+              reflect(footer_boxes[1]),
           text(" "),
-          scroll_down_btn->Render() | color(Color::CyanLight),
+          scroll_down_btn->Render() | color(Color::CyanLight) |
+              reflect(footer_boxes[2]),
           text(" "),
-          scroll_bottom_btn->Render() | color(Color::CyanLight),
+          scroll_bottom_btn->Render() | color(Color::CyanLight) |
+              reflect(footer_boxes[3]),
           text("  "),
-          jump_research_btn->Render() | color(Color::YellowLight),
+          jump_research_btn->Render() | color(Color::YellowLight) |
+              reflect(footer_boxes[4]),
           filler(),
-          text(" Scroll: " + std::to_string(pct) + "%  │  Mouse Wheel / PgUp / "
-               "PgDn  │  Esc: Exit ") |
+          text(" Scroll: " + std::to_string(pct) +
+               "%  │  Mouse Wheel / PgUp / PgDn  │  Esc: Exit ") |
               dim,
       });
 
       return vbox({
           top_bar,
-          form_window,
+          separatorLight(),
+          trip_pref_bar,
+          search_capsule_window,
           filters_window,
           scrollable_viewport,
           separatorLight(),
@@ -2035,14 +2914,140 @@ public:
       });
     });
 
-    // Global event handler for smooth mouse wheel, scrollbar click/drag, & keys
-    auto event_handler = CatchEvent(renderer, [&](Event event) {
+    // Root component with Modal overlay for Calendar Picker
+    auto root_with_modal =
+        Modal(renderer, calendar_picker.GetComponent(), &calendar_picker.is_open);
+
+    auto update_mouse_cursor_at = [&](int mx, int my) {
+      if (calendar_picker.is_open) {
+        set_mouse_cursor(
+            calendar_picker.is_over_interactive(mx, my) ? "pointer" : "default");
+        return;
+      }
+
+      // Text inputs -> I-beam ("text")
+      if (filter_input_box.Contain(mx, my)) {
+        set_mouse_cursor("text");
+        return;
+      }
+      if (selected_trip_type != 2) {
+        if (src_input_box.Contain(mx, my) || dst_input_box.Contain(mx, my)) {
+          set_mouse_cursor("text");
+          return;
+        }
+      } else {
+        for (int i = 0; i < num_active_legs; ++i) {
+          if (leg_src_boxes[i].Contain(mx, my) ||
+              leg_dst_boxes[i].Contain(mx, my)) {
+            set_mouse_cursor("text");
+            return;
+          }
+        }
+      }
+
+      // Clickable buttons, tabs, chips, cards -> Hand ("pointer")
+      if (map_toggle_box.Contain(mx, my) ||
+          research_toggle_box.Contain(mx, my) || exit_box.Contain(mx, my) ||
+          trip_type_box.Contain(mx, my) || preference_box.Contain(mx, my) ||
+          search_box.Contain(mx, my) || clear_filter_box.Contain(mx, my) ||
+          cheapest_summary_box.Contain(mx, my) ||
+          fastest_summary_box.Contain(mx, my)) {
+        set_mouse_cursor("pointer");
+        return;
+      }
+      for (int i = 0; i < 6; ++i) {
+        if (chip_boxes[i].Contain(mx, my)) {
+          set_mouse_cursor("pointer");
+          return;
+        }
+      }
+      for (int i = 0; i < 5; ++i) {
+        if (footer_boxes[i].Contain(mx, my)) {
+          set_mouse_cursor("pointer");
+          return;
+        }
+      }
+      if (selected_trip_type != 2) {
+        if (swap_box.Contain(mx, my) || dep_date_box.Contain(mx, my)) {
+          set_mouse_cursor("pointer");
+          return;
+        }
+        if (selected_trip_type == 0 &&
+            (ret_date_box.Contain(mx, my) || tab_outbound_box.Contain(mx, my) ||
+             tab_return_box.Contain(mx, my))) {
+          set_mouse_cursor("pointer");
+          return;
+        }
+        for (size_t i = 0; i < MAX_SUGGESTIONS; ++i) {
+          if ((i < src_matches.size() && src_sugg_boxes[i].Contain(mx, my)) ||
+              (i < dst_matches.size() && dst_sugg_boxes[i].Contain(mx, my))) {
+            set_mouse_cursor("pointer");
+            return;
+          }
+        }
+      } else {
+        if (add_leg_box.Contain(mx, my) || remove_leg_box.Contain(mx, my)) {
+          set_mouse_cursor("pointer");
+          return;
+        }
+        for (int i = 0; i < num_active_legs; ++i) {
+          if (leg_date_boxes[i].Contain(mx, my) ||
+              leg_tab_boxes[i].Contain(mx, my)) {
+            set_mouse_cursor("pointer");
+            return;
+          }
+        }
+      }
+      if (viewport_box.Contain(mx, my)) {
+        if (mx >= viewport_box.x_max - 1) {
+          set_mouse_cursor("pointer");
+          return;
+        }
+        for (size_t i = 0;
+             i < option_boxes.size() && i < filtered_itineraries.size(); ++i) {
+          if (option_boxes[i].Contain(mx, my)) {
+            set_mouse_cursor("pointer");
+            return;
+          }
+        }
+      }
+
+      set_mouse_cursor("default");
+    };
+
+    auto any_input_focused = [&]() {
+      if (source_input->Focused() || dest_input->Focused() ||
+          filter_input->Focused()) {
+        return true;
+      }
+      for (int i = 0; i < num_active_legs; ++i) {
+        if (leg_src_inputs[i]->Focused() || leg_dst_inputs[i]->Focused())
+          return true;
+      }
+      return false;
+    };
+
+    // Global event handler for smooth mouse wheel, clicks, cursor, and keys
+    auto event_handler = CatchEvent(root_with_modal, [&](Event event) {
+      if (event.is_mouse()) {
+        update_mouse_cursor_at(event.mouse().x, event.mouse().y);
+      }
+
+      if (calendar_picker.is_open) {
+        if (event == Event::Escape) {
+          calendar_picker.is_open = false;
+          return true;
+        }
+        return false;
+      }
+
       if (event == Event::Escape) {
+        set_mouse_cursor("");
         screen.Exit();
         return true;
       }
 
-      // Mouse wheel & scrollbar dragging inside the results viewport
+      // Mouse wheel, hover cursor, scrollbar dragging & click-to-focus
       if (event.is_mouse()) {
         auto &m = event.mouse();
         if (m.button == Mouse::WheelDown) {
@@ -2067,23 +3072,110 @@ public:
           return true;
         }
 
-        // Left click on summary comparison cards or any flight option row
+        // Direct mouse click handlers: ensure focus & cursor update accurately!
         if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+          // 1. Input boxes (clicking border OR inner text focuses the input!)
+          auto handle_input_box_click = [&](const ftxui::Box &box,
+                                            Component &input_comp) -> int {
+            if (!box.Contain(m.x, m.y))
+              return 0; // not hit
+            input_comp->TakeFocus();
+            // Let inner text line event pass through for exact caret placement
+            bool on_border = (m.x == box.x_min || m.x == box.x_max ||
+                              m.y == box.y_min || m.y == box.y_max);
+            return on_border ? 2 : 1;
+          };
+
+          if (int r = handle_input_box_click(filter_input_box, filter_input)) {
+            return (r == 2);
+          }
+          if (selected_trip_type != 2) {
+            if (int r = handle_input_box_click(src_input_box, source_input)) {
+              return (r == 2);
+            }
+            if (int r = handle_input_box_click(dst_input_box, dest_input)) {
+              return (r == 2);
+            }
+          } else {
+            for (int i = 0; i < num_active_legs; ++i) {
+              if (int r = handle_input_box_click(leg_src_boxes[i],
+                                                 leg_src_inputs[i])) {
+                return (r == 2);
+              }
+              if (int r = handle_input_box_click(leg_dst_boxes[i],
+                                                 leg_dst_inputs[i])) {
+                return (r == 2);
+              }
+            }
+          }
+
+          // 2. Controls & buttons (move focus away from inputs on click)
+          if (swap_box.Contain(m.x, m.y)) {
+            swap_btn->TakeFocus();
+            std::swap(source_str, dest_str);
+            update_suggestions();
+            execute_search(show_research_mode);
+            return true;
+          }
+          if (dep_date_box.Contain(m.x, m.y)) {
+            dep_date_btn->TakeFocus();
+            open_dep_calendar();
+            return true;
+          }
+          if (selected_trip_type == 0 && ret_date_box.Contain(m.x, m.y)) {
+            ret_date_btn->TakeFocus();
+            open_ret_calendar();
+            return true;
+          }
+          if (selected_trip_type == 0 && tab_outbound_box.Contain(m.x, m.y)) {
+            tab_outbound_btn->TakeFocus();
+            active_roundtrip_tab = 0;
+            apply_filters();
+            return true;
+          }
+          if (selected_trip_type == 0 && tab_return_box.Contain(m.x, m.y)) {
+            tab_return_btn->TakeFocus();
+            active_roundtrip_tab = 1;
+            apply_filters();
+            return true;
+          }
+          if (selected_trip_type == 2) {
+            for (int i = 0; i < num_active_legs; ++i) {
+              if (leg_tab_boxes[i].Contain(m.x, m.y)) {
+                leg_tab_btns[i]->TakeFocus();
+                active_multi_leg_idx = i;
+                apply_filters();
+                return true;
+              }
+              if (leg_date_boxes[i].Contain(m.x, m.y)) {
+                leg_date_btns[i]->TakeFocus();
+                open_leg_calendar(i);
+                return true;
+              }
+            }
+          }
+
           if (cheapest_summary_box.Contain(m.x, m.y)) {
+            preference_toggle->TakeFocus();
             selected_preference = 1;
             last_preference = 1;
             sync_selected_flight_from_preference();
             return true;
           }
           if (fastest_summary_box.Contain(m.x, m.y)) {
+            preference_toggle->TakeFocus();
             selected_preference = 2;
             last_preference = 2;
             sync_selected_flight_from_preference();
             return true;
           }
-          for (size_t i = 0; i < option_boxes.size() && i < filtered_itineraries.size(); ++i) {
+          for (size_t i = 0;
+               i < option_boxes.size() && i < filtered_itineraries.size(); ++i) {
             if (option_boxes[i].Contain(m.x, m.y)) {
-              selected_flight_idx = static_cast<int>(i);
+              if (i < MAX_OPTION_BUTTONS) {
+                opt_buttons[i]->TakeFocus();
+              }
+              on_select_flight_option(static_cast<int>(i));
               return true;
             }
           }
@@ -2100,19 +3192,17 @@ public:
         scroll_line = std::max(0, scroll_line - page_step);
         return true;
       }
-      if (event == Event::Home && !source_input->Focused() &&
-          !dest_input->Focused() && !filter_input->Focused()) {
+      if (event == Event::Home && !any_input_focused()) {
         scroll_line = 0;
         return true;
       }
-      if (event == Event::End && !source_input->Focused() &&
-          !dest_input->Focused() && !filter_input->Focused()) {
+      if (event == Event::End && !any_input_focused()) {
         scroll_line = get_max_scroll();
         return true;
       }
 
       // 'j' / 'k' vim-style scroll & 'q' exit ONLY when not typing in an input
-      if (!source_input->Focused() && !dest_input->Focused() && !filter_input->Focused()) {
+      if (!any_input_focused()) {
         if (event == Event::Character('j')) {
           scroll_line = std::min(get_max_scroll(), scroll_line + 3);
           return true;
@@ -2122,6 +3212,7 @@ public:
           return true;
         }
         if (event == Event::Character('q')) {
+          set_mouse_cursor("");
           screen.Exit();
           return true;
         }
@@ -2131,5 +3222,6 @@ public:
     });
 
     screen.Loop(event_handler);
+    set_mouse_cursor("");
   }
 };
