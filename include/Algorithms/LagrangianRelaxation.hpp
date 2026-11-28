@@ -146,16 +146,20 @@ public:
         continue;
       }
 
-      for (const flight &edge : adjacency_list[curr.node_id]) {
+      const uint32_t req_dep =
+          (curr.node_id == source_id)
+              ? curr.current_time
+              : (curr.current_time + nodes[curr.node_id].min_transfer);
+      const int32_t origin_utc_offset = nodes[curr.node_id].utc_offset_15m * 15;
+      auto day_range = get_flight_day_range(
+          adjacency_list[curr.node_id], curr.current_time,
+          req_dep, origin_utc_offset);
+
+      for (auto it = day_range.begin; it != day_range.end; ++it) {
+        const flight &edge = *it;
         metrics.edges_relaxed++;
         uint32_t next_node = edge.destination_id;
 
-        uint32_t req_dep = curr.current_time + nodes[curr.node_id].min_transfer;
-        if (curr.node_id == source_id) {
-          req_dep = curr.current_time;
-        }
-
-        int32_t origin_utc_offset = nodes[curr.node_id].utc_offset_15m * 15;
         uint32_t abs_dep = static_cast<uint32_t>(
             static_cast<int32_t>(edge.flight_day * 1440 + edge.departure_time) -
             origin_utc_offset);

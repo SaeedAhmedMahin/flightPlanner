@@ -4,14 +4,10 @@
 #include "Algorithms/ColumnGeneration.hpp"
 #include "Algorithms/ContractionHierarchies.hpp"
 #include "Algorithms/Dijkstra.hpp"
-#include "Algorithms/LabelCorrecting.hpp"
 #include "Algorithms/LagrangianRelaxation.hpp"
-#include "Algorithms/MetaheuristicRouter.hpp"
-#include "Algorithms/PulseRouter.hpp"
 #include "Algorithms/RCAStar.hpp"
 #include "Algorithms/TwoPhaseHubRouter.hpp"
 #include "Algorithms/TwoPhaseRouter.hpp"
-#include "Algorithms/Yen.hpp"
 #include "DataLoader.hpp"
 #include "DataStructures/AirportSearch.hpp"
 #include "TUI/InteractiveApp.hpp"
@@ -223,7 +219,7 @@ int main(int argc, char *argv[]) {
   if (isatty(STDIN_FILENO)) {
     std::string init_src = source_iata.empty() ? "DAC" : source_iata;
     std::string init_dst = dest_iata.empty() ? "JFK" : dest_iata;
-    std::string init_date = target_date.empty() ? "2026-11-15" : target_date;
+    std::string init_date = target_date.empty() ? "2027-02-15" : target_date;
     bool start_research = (ui_mode == TUIViews::UIMode::RESEARCHER);
 
     InteractiveApp app(loader, init_src, init_dst, init_date, start_research);
@@ -281,34 +277,44 @@ int main(int argc, char *argv[]) {
                             source_utc_offset); // 00:00 local in UTC minutes
 
   // =========================================================================
-  // 1. CUSTOMER MODE: FAST, CLEAN, ITINERARY-FOCUSED (NO ALGORITHM DETAILS)
+  // 1. CUSTOMER MODE: FAST, CLEAN, ITINERARY-FOCUSED (MULTI-RUN ALT)
   // =========================================================================
   if (ui_mode == TUIViews::UIMode::CUSTOMER) {
-    // In Customer Mode, run fast optimal router & Yen's K-SP for best-choice recommendation
-    YenRouter yen_router;
-    YenRouter::YenKResult yen_k_cheapest = yen_router.run(
+    static ALTRouter::LandmarkData customer_alt_landmarks;
+    ALTRouter alt_router;
+    ALTRouter::DiverseKResult alt_diverse = alt_router.run_k_diverse(
         source_id, dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::PRICE, absolute_start_time, 5);
+        loader.static_route_graph, loader.reverse_static_graph,
+        loader.static_route_min_price, loader.static_route_min_duration,
+        customer_alt_landmarks, absolute_start_time, 10, 5,
+        absolute_start_time);
 
-    AStar astar_router;
-    RoutingResult fastest_res = astar_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::TIME, absolute_start_time);
+    RoutingResult cheapest_res{false, 0, 0, {}, {}};
+    RoutingResult fastest_res{false, 0, 0, {}, {}};
+    if (!alt_diverse.paths.empty()) {
+      cheapest_res = alt_diverse.paths[0];
+      fastest_res = alt_diverse.paths[0];
+      for (const auto &p : alt_diverse.paths) {
+        if (p.total_price < cheapest_res.total_price)
+          cheapest_res = p;
+        if (p.total_time_mins < fastest_res.total_time_mins)
+          fastest_res = p;
+      }
+    }
 
-    RoutingResult cheapest_res = yen_k_cheapest.k_paths.empty()
-                                     ? RoutingResult{false, 0, 0, {}, {}}
-                                     : yen_k_cheapest.k_paths[0];
-
+    std::string best_key = serialize_flight_path(alt_diverse.best_recommendation.path);
     std::vector<RoutingResult> alternatives;
-    for (size_t i = 1; i < yen_k_cheapest.k_paths.size(); ++i) {
-      alternatives.push_back(yen_k_cheapest.k_paths[i]);
+    for (const auto &p : alt_diverse.paths) {
+      if (serialize_flight_path(p.path) != best_key) {
+        alternatives.push_back(p);
+      }
     }
 
     // Render FTXUI Customer View
     TUIViews::render_customer_mode(
         source_iata, dest_iata, target_date, loader, source_id, dest_id,
-        yen_k_cheapest.best_recommendation.result,
-        yen_k_cheapest.best_recommendation.recommendation_reason,
+        alt_diverse.best_recommendation,
+        alt_diverse.recommendation_reason,
         cheapest_res, fastest_res, alternatives);
 
     return 0;
@@ -319,7 +325,7 @@ int main(int argc, char *argv[]) {
   // =========================================================================
   std::cout << "\n[RESEARCHER MODE] Routing: " << source_iata << " -> "
             << dest_iata << " on " << target_date << "\n";
-  std::cout << "Initializing Algorithmic Suite (Contraction Hierarchies, ALT, Exact Solvers, Metaheuristics)...\n";
+  std::cout << "Initializing Algorithmic Suite (Contraction Hierarchies, Multiple ALT, Exact Solvers, & Hierarchies)...\n";
 
   // Offline preprocessing for Contraction Hierarchies
   static ContractionHierarchiesRouter::CHGraph ch_graph_price;
@@ -460,51 +466,7 @@ int main(int argc, char *argv[]) {
     benchmarks.push_back({"Contraction H.", "fastest", duration.count(), res});
   }
 
-  // 6. Label-Correcting Algorithm (SPPRC Bellman-Ford Variant)
-  LabelCorrectingRouter label_correcting_router;
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = label_correcting_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::PRICE, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Label-Corr", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = label_correcting_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::TIME, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Label-Corr", "fastest", duration.count(), res});
-  }
-
-  // 7. Pulse Algorithm (Pruned DFS with Dynamic Bounding)
-  PulseRouter pulse_router;
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = pulse_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
-        loader.static_route_min_price, loader.nodes, OptimizeFor::PRICE,
-        absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Pulse", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = pulse_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
-        loader.static_route_min_price, loader.nodes, OptimizeFor::TIME,
-        absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Pulse", "fastest", duration.count(), res});
-  }
-
-  // 8. Lagrangian Relaxation Router
+  // 6. Lagrangian Relaxation Router
   LagrangianRelaxationRouter lr_router;
   {
     auto start = std::chrono::high_resolution_clock::now();
@@ -527,7 +489,7 @@ int main(int argc, char *argv[]) {
     benchmarks.push_back({"Lagrangian", "fastest", duration.count(), res});
   }
 
-  // 9. Column Generation Router (Master RMP & Subproblem)
+  // 7. Column Generation Router (Master RMP & Subproblem)
   ColumnGenerationRouter cg_router;
   {
     auto start = std::chrono::high_resolution_clock::now();
@@ -548,28 +510,7 @@ int main(int argc, char *argv[]) {
     benchmarks.push_back({"Column-Gen", "fastest", duration.count(), res});
   }
 
-  // 10. Metaheuristics (Hybrid GA-ACO)
-  MetaheuristicRouter meta_router;
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = meta_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::PRICE, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"GA-ACO Meta", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = meta_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::TIME, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"GA-ACO Meta", "fastest", duration.count(), res});
-  }
-
-  // 11. BFS Router (Minimum Transfers)
+  // 8. BFS Router (Minimum Transfers)
   BFSRouter bfs_router;
   {
     auto start = std::chrono::high_resolution_clock::now();
@@ -636,30 +577,34 @@ int main(int argc, char *argv[]) {
     benchmarks.push_back({"Two-Phase Hub", "fastest", duration.count(), res});
   }
 
-  // 14. Yen's Algorithm (K-Shortest Paths & Best Path Recommendation)
-  YenRouter yen_router;
-  YenRouter::YenKResult yen_k_cheapest;
+  // 11. Multiple ALT (Diversified K-Best Paths & Best Path Recommendation)
+  ALTRouter::DiverseKResult multi_alt_res;
   {
     auto start = std::chrono::high_resolution_clock::now();
-    yen_k_cheapest =
-        yen_router.run(source_id, dest_id, loader.adjacency_list, loader.nodes,
-                       OptimizeFor::PRICE, absolute_start_time, 5);
+    multi_alt_res = alt_router.run_k_diverse(
+        source_id, dest_id, loader.adjacency_list, loader.nodes,
+        loader.static_route_graph, loader.reverse_static_graph,
+        loader.static_route_min_price, loader.static_route_min_duration,
+        alt_landmark_data, absolute_start_time, 10, 5, absolute_start_time);
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::high_resolution_clock::now() - start);
-    RoutingResult primary_yen = yen_k_cheapest.k_paths.empty()
-                                    ? RoutingResult{false, 0, 0, {}, {}}
-                                    : yen_k_cheapest.k_paths[0];
+    RoutingResult primary_alt =
+        multi_alt_res.best_recommendation.success
+            ? multi_alt_res.best_recommendation
+            : (multi_alt_res.paths.empty()
+                   ? RoutingResult{false, 0, 0, {}, {}}
+                   : multi_alt_res.paths[0]);
     benchmarks.push_back(
-        {"Yen's K-SP", "cheapest", duration.count(), primary_yen});
+        {"Multiple ALT", "diverse", duration.count(), primary_alt});
   }
 
-  // Render Researcher TUI with FTXUI (Benchmark table, visual profiler, Yen's analysis)
+  // Render Researcher TUI with FTXUI (Benchmark table, visual profiler, Multiple ALT analysis)
   TUIViews::render_researcher_mode(
       source_iata, dest_iata, target_date, loader, source_id, dest_id,
-      benchmarks, yen_k_cheapest.best_recommendation.result,
-      yen_k_cheapest.best_recommendation.recommendation_reason,
-      yen_k_cheapest.best_recommendation.generalized_cost,
-      yen_k_cheapest.k_paths);
+      benchmarks, multi_alt_res.best_recommendation,
+      multi_alt_res.recommendation_reason,
+      multi_alt_res.generalized_cost,
+      multi_alt_res.paths);
 
   // Consolidated path equivalence breakdown
   std::cout << "\n--- DETAILED FLIGHT ITINERARIES (ALGORITHM CONSENSUS GROUPS) ---\n";

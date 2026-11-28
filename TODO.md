@@ -47,7 +47,7 @@
      - [x] Clickable Flight Options & Dedicated Detailed Flight View Space (mouse & button selection for all options, live card updates with leg breakdowns, times, transits, and fares)
      - [x] Google Flights UI Overhaul:
          - [x] Modern Google Flights search capsule layout with clean horizontal inputs
-         - [x] Support 3 Trip Types: Round-trip (`⇄ Round trip`), One-way (`➔ One-way`), and Multi-city (`🔀 Multi-city`)
+         - [x] Support 3 Trip Types: Round-trip (`⇄ Round trip`), One-way (`➔ One-way`), and Multi-city (` Multi-city`)
          - [x] Swap button (`[ ⇄ ]`) to instantly reverse origin and destination
          - [x] Single Date Button(s) replacing separate year/month/day dropdowns
          - [x] Interactive Calendar Picker Modal (`CalendarPicker.hpp`) with 7-column day grid, month/year navigation, and date confirmation

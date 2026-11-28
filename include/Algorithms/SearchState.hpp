@@ -1,6 +1,9 @@
 #pragma once
 #include "../DataStructures/flight.hpp"
+#include <algorithm>
 #include <cstdint>
+#include <limits>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // SearchState: The priority queue element. Carries enough info to:
@@ -53,3 +56,37 @@ struct Label {
   flight edge_taken;       // The flight used to arrive at airport_id
   uint8_t hops;            // Number of flight legs taken so far
 };
+
+struct FlightDayRange {
+  std::vector<flight>::const_iterator begin;
+  std::vector<flight>::const_iterator end;
+};
+
+// Returns [begin, end) covering outgoing flights in [req_dep, curr_utc + 1440]
+// from day-sorted adjacency lists in O(log N) instead of scanning all 334 days.
+inline FlightDayRange get_flight_day_range(const std::vector<flight> &edges,
+                                           uint32_t curr_utc, uint32_t req_dep,
+                                           int32_t origin_utc_offset) {
+  if (edges.empty()) {
+    return {edges.end(), edges.end()};
+  }
+  const int64_t curr_i = static_cast<int32_t>(curr_utc);
+  const int64_t req_i = static_cast<int32_t>(req_dep);
+  const int64_t min_local = req_i + origin_utc_offset;
+  const uint16_t min_day =
+      (min_local > 0) ? static_cast<uint16_t>(min_local / 1440) : 0;
+  const int64_t max_day = (curr_i + 1440 + origin_utc_offset) / 1440;
+
+  auto it = std::lower_bound(
+      edges.begin(), edges.end(), min_day,
+      [](const flight &f, uint16_t d) { return f.flight_day < d; });
+  auto end_it = edges.end();
+  if (max_day >= 0) {
+    uint16_t cap_day = static_cast<uint16_t>(
+        std::min<int64_t>(max_day, std::numeric_limits<uint16_t>::max()));
+    end_it = std::upper_bound(
+        it, edges.end(), cap_day,
+        [](uint16_t d, const flight &f) { return d < f.flight_day; });
+  }
+  return {it, end_it};
+}

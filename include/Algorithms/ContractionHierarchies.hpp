@@ -93,6 +93,7 @@ public:
     std::vector<std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>>> adj(n);
     std::vector<std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>>> radj(n);
     std::unordered_map<uint64_t, int32_t> shortcut_middle;
+    shortcut_middle.reserve(n * 16);
 
     auto make_key = [](uint32_t u, uint32_t v) -> uint64_t {
       return (static_cast<uint64_t>(u) << 32) | v;
@@ -508,12 +509,16 @@ public:
           req_dep = state.current_time;
         }
 
-        for (const flight &f : adjacency_list[u]) {
+        const int32_t origin_utc_offset = nodes[u].utc_offset_15m * 15;
+        auto day_range = get_flight_day_range(
+            adjacency_list[u], state.current_time, req_dep, origin_utc_offset);
+
+        for (auto it = day_range.begin; it != day_range.end; ++it) {
+          const flight &f = *it;
           if (f.destination_id != v)
             continue;
           metrics.edges_relaxed++;
 
-          int32_t origin_utc_offset = nodes[u].utc_offset_15m * 15;
           uint32_t abs_dep = static_cast<uint32_t>(
               static_cast<int32_t>(f.flight_day * 1440 + f.departure_time) -
               origin_utc_offset);

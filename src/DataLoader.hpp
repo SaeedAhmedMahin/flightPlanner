@@ -1,12 +1,17 @@
 #pragma once
 
 // Standard libraries
+#include <algorithm>
+#include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -18,23 +23,29 @@
 
 class DataLoader {
 public:
-  static uint8_t parse_date_to_days(const std::string &date_str) {
+  static uint16_t parse_date_to_days(const std::string &date_str) {
     int y, m, d;
     if (sscanf(date_str.c_str(), "%d-%d-%d", &y, &m, &d) != 3)
       return 0;
     static const int days_in_month[] = {0,  31, 28, 31, 30, 31, 30,
                                         31, 31, 30, 31, 30, 31};
+    auto is_leap = [](int yr) {
+      return (yr % 4 == 0 && yr % 100 != 0) || (yr % 400 == 0);
+    };
+    if (y < 2027 || (y == 2027 && m < 2))
+      return 0;
     int days = 0;
-    for (int year = 2026; year < y; ++year) {
-      days += 365 + ((year % 4 == 0) ? 1 : 0);
+    for (int year = 2027; year < y; ++year) {
+      days += is_leap(year) ? 366 : 365;
     }
     for (int month = 1; month < m; ++month) {
       days += days_in_month[month];
-      if (month == 2 && y % 4 == 0)
+      if (month == 2 && is_leap(y))
         days++;
     }
     days += d - 1;
-    return days > 273 ? static_cast<uint8_t>(days - 273) : 0;
+    // Epoch is 2027-02-01 (day 31 of 2027, 0-indexed)
+    return days > 31 ? static_cast<uint16_t>(days - 31) : 0;
   }
 
   // Core Algorithmic Graph
@@ -91,6 +102,8 @@ public:
                  const std::string &routes_csv,
                  const std::string &airlines_csv = "data/raw/airlines.dat") {
     parse_airlines(airlines_csv);
+    // Modern active carrier overrides where OpenFlights snapshot had reused codes
+    airline_names["BS"] = "US-Bangla Airlines";
     parse_airports(airports_csv);
 
     // Resize adjacency lists to exactly match the number of airports (V)
@@ -101,6 +114,47 @@ public:
     static_route_min_duration.resize(nodes.size());
 
     parse_routes(routes_csv);
+
+    // Sort each airport's outgoing flights by flight_day and departure_time so
+    // routers can binary-search a narrow date window instead of scanning 334 days.
+    {
+      auto sort_bucket = [](std::vector<flight> &edges) {
+        if (edges.size() <= 1)
+          return;
+        std::sort(edges.begin(), edges.end(),
+                  [](const flight &a, const flight &b) {
+                    if (a.flight_day != b.flight_day)
+                      return a.flight_day < b.flight_day;
+                    if (a.departure_time != b.departure_time)
+                      return a.departure_time < b.departure_time;
+                    if (a.destination_id != b.destination_id)
+                      return a.destination_id < b.destination_id;
+                    return a.price < b.price;
+                  });
+      };
+
+      const size_t num_airports = adjacency_list.size();
+      const unsigned hw = std::thread::hardware_concurrency();
+      const unsigned num_threads =
+          std::min<unsigned>(4, std::max<unsigned>(1, hw));
+      if (num_threads > 1 && num_airports >= 64) {
+        std::vector<std::thread> workers;
+        workers.reserve(num_threads);
+        for (unsigned t = 0; t < num_threads; ++t) {
+          workers.emplace_back([&, t, num_threads]() {
+            for (size_t u = t; u < num_airports; u += num_threads) {
+              sort_bucket(adjacency_list[u]);
+            }
+          });
+        }
+        for (auto &w : workers)
+          w.join();
+      } else {
+        for (auto &edges : adjacency_list) {
+          sort_bucket(edges);
+        }
+      }
+    }
 
     // Build unique static corridor connections with minimum route price and duration
     for (size_t u = 0; u < adjacency_list.size(); ++u) {
@@ -265,44 +319,92 @@ private:
 
   void parse_routes(const std::string &filepath) {
     std::string path = resolve_path(filepath);
-    std::ifstream file(path);
+    std::vector<char> io_buf(4 * 1024 * 1024);
+    std::ifstream file;
+    file.rdbuf()->pubsetbuf(io_buf.data(), static_cast<std::streamsize>(io_buf.size()));
+    file.open(path);
     if (!file.is_open())
       throw std::runtime_error("Could not open routes CSV at: " + filepath);
 
     std::string line;
     std::getline(file, line); // Skip header
 
+    // Reserve dynamically from file size to avoid giant reallocations at 40M+ rows
+    uint64_t fsize = std::filesystem::file_size(path);
+    ui_flights.reserve(static_cast<size_t>(fsize / 39 + 1024));
     uint32_t current_flight_id = 0;
 
+    auto parse_u32 = [](std::string_view sv) -> uint32_t {
+      uint32_t val = 0;
+      std::from_chars(sv.data(), sv.data() + sv.size(), val);
+      return val;
+    };
+
     while (std::getline(file, line)) {
+      if (!line.empty() && line.back() == '\r')
+        line.pop_back();
       if (line.empty())
         continue;
-      auto cols = parse_csv_line(line);
 
-      // Cols: dense_source, dense_dest, airline, equip, price, date, duration,
-      // dep, arr
-      uint32_t src_id = std::stoul(cols[0]);
+      std::string_view fields[9];
+      std::vector<std::string> quoted_cols;
+      bool used_fast_path = (line.find('"') == std::string::npos);
+
+      if (used_fast_path) {
+        std::string_view sv(line);
+        size_t start = 0;
+        int col = 0;
+        while (col < 8) {
+          size_t comma = sv.find(',', start);
+          if (comma == std::string_view::npos) {
+            used_fast_path = false;
+            break;
+          }
+          fields[col++] = sv.substr(start, comma - start);
+          start = comma + 1;
+        }
+        if (used_fast_path) {
+          fields[8] = sv.substr(start);
+        }
+      }
+
+      if (!used_fast_path) {
+        quoted_cols = parse_csv_line(line);
+        if (quoted_cols.size() < 9)
+          continue;
+        for (int i = 0; i < 9; ++i)
+          fields[i] = quoted_cols[i];
+      }
+
+      // Cols: 0:dense_source, 1:dense_dest, 2:airline, 3:equip, 4:price,
+      //       5:date, 6:duration, 7:dep, 8:arr
+      uint32_t src_id = parse_u32(fields[0]);
+      if (src_id >= adjacency_list.size())
+        continue;
+
+      std::string airline_code(fields[2]);
+      std::string date_str(fields[5]);
 
       flight f;
-      f.destination_id = std::stoul(cols[1]);
+      f.destination_id = parse_u32(fields[1]);
       f.flight_details_id = current_flight_id++;
-      f.airline_id = get_airline_idx(cols[2]);
-      f.price = static_cast<uint16_t>(std::stoul(cols[4]));
-      f.duration_mins = static_cast<uint16_t>(std::stoul(cols[6]));
-      f.departure_time = static_cast<uint16_t>(std::stoul(cols[7]));
-      f.arrival_time = static_cast<uint16_t>(std::stoul(cols[8]));
-      f.flight_day = parse_date_to_days(cols[5]);
+      f.airline_id = get_airline_idx(airline_code);
+      f.price = static_cast<uint16_t>(parse_u32(fields[4]));
+      f.duration_mins = static_cast<uint16_t>(parse_u32(fields[6]));
+      f.departure_time = static_cast<uint16_t>(parse_u32(fields[7]));
+      f.arrival_time = static_cast<uint16_t>(parse_u32(fields[8]));
+      f.flight_day = parse_date_to_days(date_str);
 
       flightDetails ui_f;
-      ui_f.airline_code = cols[2];
-      ui_f.plane_model = cols[3];
-      ui_f.flight_date = cols[5];
+      ui_f.airline_code = std::move(airline_code);
+      ui_f.plane_model = std::string(fields[3]);
+      ui_f.flight_date = std::move(date_str);
       ui_f.flight_number = static_cast<uint16_t>(
           (current_flight_id % 900) +
           100); // Generate a synthetic 3-digit flight number
 
       adjacency_list[src_id].push_back(f);
-      ui_flights.push_back(ui_f);
+      ui_flights.push_back(std::move(ui_f));
     }
     std::cout << "Loaded " << ui_flights.size() << " flight edges.\n";
   }

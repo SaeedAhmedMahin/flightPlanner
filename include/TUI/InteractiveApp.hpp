@@ -6,14 +6,10 @@
 #include "Algorithms/ColumnGeneration.hpp"
 #include "Algorithms/ContractionHierarchies.hpp"
 #include "Algorithms/Dijkstra.hpp"
-#include "Algorithms/LabelCorrecting.hpp"
 #include "Algorithms/LagrangianRelaxation.hpp"
-#include "Algorithms/MetaheuristicRouter.hpp"
-#include "Algorithms/PulseRouter.hpp"
 #include "Algorithms/RCAStar.hpp"
 #include "Algorithms/TwoPhaseHubRouter.hpp"
 #include "Algorithms/TwoPhaseRouter.hpp"
-#include "Algorithms/Yen.hpp"
 #include "DataLoader.hpp"
 #include "DataStructures/AirportSearch.hpp"
 #include "DataStructures/FilterParser.hpp"
@@ -70,10 +66,10 @@ public:
 
   // Calendar Picker Integration
   FlightPlanner::TUI::CalendarPicker calendar_picker;
-  std::string dep_date_str = "2026-11-15";
-  std::string ret_date_str = "2026-11-22";
-  std::string dep_date_btn_label = " 🛫 Dep: Sun, Nov 15 ";
-  std::string ret_date_btn_label = " 🛬 Ret: Sun, Nov 22 ";
+  std::string dep_date_str = "2027-02-15";
+  std::string ret_date_str = "2027-02-22";
+  std::string dep_date_btn_label = " 🛫 Dep: Mon, Feb 15 ";
+  std::string ret_date_btn_label = " 🛬 Ret: Mon, Feb 22 ";
 
   void update_date_btn_labels() {
     if (selected_trip_type == 1) { // One-way
@@ -177,10 +173,10 @@ public:
   std::vector<std::string> preference_entries = {
       " ⭐ Best Value ", " 🏷️  Cheapest ", " ⚡ Fastest "};
 
-  // Convert dataset flight_day (days since 2026-10-01) back to YYYY-MM-DD
+  // Convert dataset flight_day (days since 2027-02-01) back to YYYY-MM-DD
   static std::string flight_day_to_iso(int flight_day) {
-    int y = 2026;
-    int m = 10;
+    int y = 2027;
+    int m = 2;
     int d = 1 + std::max(0, flight_day);
     while (true) {
       int dim = FlightPlanner::TUI::CalendarPicker::days_in_month(y, m);
@@ -380,7 +376,7 @@ public:
               ? "Non-stop direct flight matching your filters."
               : "Optimal balance between ticket fare and journey duration.";
 
-      yen_alternatives.clear();
+      alt_alternatives.clear();
       std::string chosen_key = serialize_path_key(
           (selected_preference == 0)
               ? best_flight.path
@@ -389,7 +385,7 @@ public:
 
       for (const auto &res : pool) {
         if (serialize_path_key(res.path) != chosen_key) {
-          yen_alternatives.push_back(res);
+          alt_alternatives.push_back(res);
         }
       }
 
@@ -401,24 +397,48 @@ public:
       cheapest_flight = RoutingResult{false, 0, 0, {}, {}};
       fastest_flight = RoutingResult{false, 0, 0, {}, {}};
       best_flight = RoutingResult{false, 0, 0, {}, {}};
-      yen_alternatives.clear();
+      alt_alternatives.clear();
       selected_flight_idx = -1;
     }
   }
 
-  void apply_filters() {
-    std::vector<std::pair<std::string, std::string>> available_airlines;
+  bool filters_dirty = true;
+  std::string last_applied_filter_str = "\x01";
+  std::vector<std::pair<std::string, std::string>> available_airlines_cache;
+  std::string last_ret_date_queried;
+  uint32_t last_ret_eff_start_utc = UINT32_MAX;
+  uint32_t last_ret_src_id = UINT32_MAX;
+  uint32_t last_ret_dst_id = UINT32_MAX;
+
+  std::string last_live_src_q = "\x01";
+  std::string cached_origin_desc = "Type city, country or code";
+  bool cached_origin_valid = false;
+  std::string last_live_dst_q = "\x01";
+  std::string cached_dest_desc = "Type city, country or code";
+  bool cached_dest_valid = false;
+
+  void rebuild_airlines_cache() {
+    available_airlines_cache.clear();
+    available_airlines_cache.reserve(airline_codes.size() + loader.airline_names.size());
     for (const auto &code : airline_codes) {
       if (code != "ALL") {
-        available_airlines.push_back({code, loader.get_airline_name(code)});
+        available_airlines_cache.push_back({code, loader.get_airline_name(code)});
       }
     }
     for (const auto &entry : loader.airline_names) {
-      available_airlines.push_back({entry.first, entry.second});
+      available_airlines_cache.push_back({entry.first, entry.second});
+    }
+  }
+
+  void apply_filters() {
+    filters_dirty = false;
+    last_applied_filter_str = typed_filter_str;
+    if (available_airlines_cache.empty()) {
+      rebuild_airlines_cache();
     }
 
-    active_spec =
-        FilterParser::parse_typed_filter(typed_filter_str, available_airlines);
+    active_spec = FilterParser::parse_typed_filter(typed_filter_str,
+                                                   available_airlines_cache);
 
     if (active_spec.preference_override != -1) {
       selected_preference = active_spec.preference_override;
@@ -527,6 +547,33 @@ public:
     on_select_flight_option(selected_flight_idx);
   }
 
+  void refresh_return_candidates(uint32_t min_ret_utc, bool force = false) {
+    if (return_source_id >= loader.nodes.size() ||
+        return_dest_id >= loader.nodes.size()) {
+      return;
+    }
+    uint32_t ret_day = DataLoader::parse_date_to_days(ret_date_str);
+    int32_t ret_utc_offset = loader.nodes[return_source_id].utc_offset_15m * 15;
+    uint32_t ret_day_start_utc = static_cast<uint32_t>(
+        static_cast<int32_t>(ret_day * 1440) - ret_utc_offset);
+    uint32_t eff_ret_utc = std::max(ret_day_start_utc, min_ret_utc);
+
+    if (!force && !return_candidates.empty() &&
+        return_source_id == last_ret_src_id &&
+        return_dest_id == last_ret_dst_id &&
+        ret_date_str == last_ret_date_queried &&
+        eff_ret_utc == last_ret_eff_start_utc) {
+      return;
+    }
+
+    last_ret_src_id = return_source_id;
+    last_ret_dst_id = return_dest_id;
+    last_ret_date_queried = ret_date_str;
+    last_ret_eff_start_utc = eff_ret_utc;
+    return_candidates = query_corridor(return_source_id, return_dest_id,
+                                       ret_date_str, min_ret_utc);
+  }
+
   void on_select_flight_option(int idx) {
     if (idx < 0 || idx >= (int)filtered_itineraries.size())
       return;
@@ -544,8 +591,7 @@ public:
             ret_date_str = min_ret_iso;
             update_date_btn_labels();
           }
-          return_candidates = query_corridor(return_source_id, return_dest_id,
-                                             ret_date_str, min_ret_utc);
+          refresh_return_candidates(min_ret_utc);
           apply_filters();
         }
       } else {
@@ -631,14 +677,14 @@ public:
   std::string best_reason;
   RoutingResult cheapest_flight;
   RoutingResult fastest_flight;
-  std::vector<RoutingResult> yen_k_paths;
-  std::vector<RoutingResult> yen_alternatives;
-  long yen_compute_us = 0;
+  std::vector<RoutingResult> multi_alt_paths;
+  std::vector<RoutingResult> alt_alternatives;
+  long multiple_alt_compute_us = 0;
   std::vector<AlgorithmBenchmark> researcher_benchmarks;
 
   InteractiveApp(DataLoader &dl, const std::string &init_src = "DAC",
                  const std::string &init_dst = "JFK",
-                 const std::string &init_date = "2026-11-15",
+                 const std::string &init_date = "2027-02-15",
                  bool start_research_mode = false)
       : loader(dl), source_str(init_src), dest_str(init_dst),
         target_date_str(init_date), dep_date_str(init_date),
@@ -646,16 +692,16 @@ public:
 
     // Initialize Multi-City Legs default itineraries
     multi_city_legs.resize(4);
-    multi_city_legs[0] = {"DAC", "DXB", "2026-11-15", " 📅 Dep: Sun, Nov 15 ",
+    multi_city_legs[0] = {"DAC", "DXB", "2027-02-15", " 📅 Dep: Mon, Feb 15 ",
                           0,     0,     {},           {},
                           {},    {},    0};
-    multi_city_legs[1] = {"DXB", "JFK", "2026-11-18", " 📅 Dep: Wed, Nov 18 ",
+    multi_city_legs[1] = {"DXB", "JFK", "2027-02-18", " 📅 Dep: Thu, Feb 18 ",
                           0,     0,     {},           {},
                           {},    {},    0};
-    multi_city_legs[2] = {"JFK", "LHR", "2026-11-22", " 📅 Dep: Sun, Nov 22 ",
+    multi_city_legs[2] = {"JFK", "LHR", "2027-02-22", " 📅 Dep: Mon, Feb 22 ",
                           0,     0,     {},           {},
                           {},    {},    0};
-    multi_city_legs[3] = {"LHR", "DAC", "2026-11-25", " 📅 Dep: Wed, Nov 25 ",
+    multi_city_legs[3] = {"LHR", "DAC", "2027-02-25", " 📅 Dep: Thu, Feb 25 ",
                           0,     0,     {},           {},
                           {},    {},    0};
     num_active_legs = 2;
@@ -701,6 +747,7 @@ public:
         name = name.substr(0, 13) + "…";
       airline_entries.push_back(code + " - " + name);
     }
+    rebuild_airlines_cache();
   }
 
   std::vector<RoutingResult> query_corridor(uint32_t src_id, uint32_t dst_id,
@@ -713,41 +760,26 @@ public:
         static_cast<int32_t>(start_day * 1440) - source_utc_offset);
     uint32_t absolute_start_time = std::max(date_start_utc, min_start_utc);
 
-    YenRouter yen_router;
-    auto yen_start = std::chrono::high_resolution_clock::now();
-    YenRouter::YenKResult yen_k = yen_router.run(
-        src_id, dst_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::PRICE, absolute_start_time, 15);
-    yen_compute_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                         std::chrono::high_resolution_clock::now() - yen_start)
-                         .count();
-
-    AStar astar_router;
-    RoutingResult absolute_fastest = astar_router.run(
-        src_id, dst_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::TIME, absolute_start_time);
-
-    std::vector<RoutingResult> candidates;
-    std::unordered_set<std::string> seen_keys;
-    for (const auto &p : yen_k.k_paths) {
-      if (p.success && !p.path.empty()) {
-        std::string k = serialize_path_key(p.path);
-        if (seen_keys.find(k) == seen_keys.end()) {
-          seen_keys.insert(k);
-          candidates.push_back(p);
-        }
-      }
+    if (!alt_landmark_data.is_preprocessed) {
+      ALTRouter::preprocess(
+          loader.nodes, loader.static_route_graph, loader.reverse_static_graph,
+          loader.static_route_min_price, loader.static_route_min_duration,
+          alt_landmark_data, 16);
     }
 
-    if (absolute_fastest.success && !absolute_fastest.path.empty()) {
-      std::string k = serialize_path_key(absolute_fastest.path);
-      if (seen_keys.find(k) == seen_keys.end()) {
-        seen_keys.insert(k);
-        candidates.push_back(absolute_fastest);
-      }
-    }
+    ALTRouter alt_router;
+    auto alt_multi_start = std::chrono::high_resolution_clock::now();
+    ALTRouter::DiverseKResult diverse_res = alt_router.run_k_diverse(
+        src_id, dst_id, loader.adjacency_list, loader.nodes,
+        loader.static_route_graph, loader.reverse_static_graph,
+        loader.static_route_min_price, loader.static_route_min_duration,
+        alt_landmark_data, absolute_start_time, 12, 5, date_start_utc);
+    multiple_alt_compute_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::high_resolution_clock::now() - alt_multi_start)
+            .count();
 
-    return candidates;
+    return std::move(diverse_res.paths);
   }
 
   void ensure_offline_preprocessed() {
@@ -902,52 +934,6 @@ public:
           {"Contraction H.", "fastest", dur.count(), res});
     }
 
-    // Label Correcting
-    LabelCorrectingRouter label_correcting_router;
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = label_correcting_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-          OptimizeFor::PRICE, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Label-Corr", "cheapest", dur.count(), res});
-    }
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = label_correcting_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-          OptimizeFor::TIME, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Label-Corr", "fastest", dur.count(), res});
-    }
-
-    // Pulse
-    PulseRouter pulse_router;
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = pulse_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list,
-          loader.static_route_graph, loader.static_route_min_price,
-          loader.nodes, OptimizeFor::PRICE, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back({"Pulse", "cheapest", dur.count(), res});
-    }
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = pulse_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list,
-          loader.static_route_graph, loader.static_route_min_price,
-          loader.nodes, OptimizeFor::TIME, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back({"Pulse", "fastest", dur.count(), res});
-    }
-
     // Lagrangian Relaxation
     LagrangianRelaxationRouter lr_router;
     {
@@ -994,29 +980,6 @@ public:
           std::chrono::high_resolution_clock::now() - start);
       researcher_benchmarks.push_back(
           {"Column-Gen", "fastest", dur.count(), res});
-    }
-
-    // Metaheuristics
-    MetaheuristicRouter meta_router;
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = meta_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-          OptimizeFor::PRICE, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"GA-ACO Meta", "cheapest", dur.count(), res});
-    }
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = meta_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-          OptimizeFor::TIME, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"GA-ACO Meta", "fastest", dur.count(), res});
     }
 
     // BFS (Hops)
@@ -1096,12 +1059,27 @@ public:
           {"Two-Phase Hub", "fastest", dur.count(), res});
     }
 
-    // Yen's K-SP
-    RoutingResult primary_yen = yen_k_paths.empty()
-                                    ? RoutingResult{false, 0, 0, {}, {}}
-                                    : yen_k_paths[0];
-    researcher_benchmarks.push_back(
-        {"Yen's K-SP", "cheapest", yen_compute_us, primary_yen});
+    // Multiple ALT (Diversified K-Best Paths)
+    {
+      auto start = std::chrono::high_resolution_clock::now();
+      ALTRouter::DiverseKResult multi_alt_res = alt_router.run_k_diverse(
+          active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
+          loader.static_route_graph, loader.reverse_static_graph,
+          loader.static_route_min_price, loader.static_route_min_duration,
+          alt_landmark_data, absolute_start_time, 12, 5, absolute_start_time);
+      multiple_alt_compute_us =
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::high_resolution_clock::now() - start)
+              .count();
+      RoutingResult primary_multi_alt =
+          multi_alt_res.best_recommendation.success
+              ? multi_alt_res.best_recommendation
+              : (multi_alt_res.paths.empty()
+                     ? RoutingResult{false, 0, 0, {}, {}}
+                     : multi_alt_res.paths[0]);
+      researcher_benchmarks.push_back(
+          {"Multiple ALT", "diverse", multiple_alt_compute_us, primary_multi_alt});
+    }
   }
 
   void execute_search(bool run_all_research = false) {
@@ -1142,7 +1120,7 @@ public:
 
       all_candidates =
           query_corridor(active_source_id, active_dest_id, dep_date_str);
-      yen_k_paths = all_candidates;
+      multi_alt_paths = all_candidates;
 
       update_airline_entries_from_candidates(all_candidates);
       apply_filters();
@@ -1229,10 +1207,9 @@ public:
       }
 
       uint32_t min_ret_utc = get_outbound_min_return_utc();
-      return_candidates = query_corridor(return_source_id, return_dest_id,
-                                         ret_date_str, min_ret_utc);
+      refresh_return_candidates(min_ret_utc, true);
 
-      yen_k_paths = outbound_candidates;
+      multi_alt_paths = outbound_candidates;
       std::vector<RoutingResult> combined_all = outbound_candidates;
       combined_all.insert(combined_all.end(), return_candidates.begin(),
                           return_candidates.end());
@@ -1321,7 +1298,7 @@ public:
       if (!multi_city_legs.empty()) {
         active_source_id = multi_city_legs[0].src_id;
         active_dest_id = multi_city_legs[0].dst_id;
-        yen_k_paths = multi_city_legs[0].candidates;
+        multi_alt_paths = multi_city_legs[0].candidates;
       }
 
       update_airline_entries_from_candidates(combined_multi);
@@ -1805,8 +1782,10 @@ public:
         sync_selected_flight_from_preference();
       }
 
-      // Live filter sync
-      apply_filters();
+      // Live filter sync (only re-run when inputs or dirty state actually changed)
+      if (filters_dirty || typed_filter_str != last_applied_filter_str) {
+        apply_filters();
+      }
 
       // Update option button labels
       for (size_t i = 0; i < MAX_OPTION_BUTTONS; ++i) {
@@ -1896,37 +1875,46 @@ public:
             price_part + " ";
       }
 
-      // Live resolution preview next to input boxes
-      std::string live_src_code =
-          AirportSearch::resolve_airport_code(source_str, loader);
-      std::string live_dst_code =
-          AirportSearch::resolve_airport_code(dest_str, loader);
-
-      std::string origin_desc;
-      bool origin_valid = false;
-      if (!live_src_code.empty() && loader.iata_to_id.count(live_src_code)) {
-        uint32_t id = loader.iata_to_id.at(live_src_code);
-        const auto &apt = loader.ui_nodes[id];
-        origin_desc = "➔ " + live_src_code + " (" + apt.city + ")";
-        origin_valid = true;
-      } else if (!source_str.empty()) {
-        origin_desc = "⚠️ Not found";
-      } else {
-        origin_desc = "Type city, country or code";
+      // Live resolution preview next to input boxes (cached per input string)
+      if (source_str != last_live_src_q) {
+        last_live_src_q = source_str;
+        std::string live_src_code =
+            AirportSearch::resolve_airport_code(source_str, loader);
+        if (!live_src_code.empty() && loader.iata_to_id.count(live_src_code)) {
+          uint32_t id = loader.iata_to_id.at(live_src_code);
+          const auto &apt = loader.ui_nodes[id];
+          cached_origin_desc = "➔ " + live_src_code + " (" + apt.city + ")";
+          cached_origin_valid = true;
+        } else if (!source_str.empty()) {
+          cached_origin_desc = "⚠️ Not found";
+          cached_origin_valid = false;
+        } else {
+          cached_origin_desc = "Type city, country or code";
+          cached_origin_valid = false;
+        }
       }
+      const std::string &origin_desc = cached_origin_desc;
+      bool origin_valid = cached_origin_valid;
 
-      std::string dest_desc;
-      bool dest_valid = false;
-      if (!live_dst_code.empty() && loader.iata_to_id.count(live_dst_code)) {
-        uint32_t id = loader.iata_to_id.at(live_dst_code);
-        const auto &apt = loader.ui_nodes[id];
-        dest_desc = "➔ " + live_dst_code + " (" + apt.city + ")";
-        dest_valid = true;
-      } else if (!dest_str.empty()) {
-        dest_desc = "⚠️ Not found";
-      } else {
-        dest_desc = "Type city, country or code";
+      if (dest_str != last_live_dst_q) {
+        last_live_dst_q = dest_str;
+        std::string live_dst_code =
+            AirportSearch::resolve_airport_code(dest_str, loader);
+        if (!live_dst_code.empty() && loader.iata_to_id.count(live_dst_code)) {
+          uint32_t id = loader.iata_to_id.at(live_dst_code);
+          const auto &apt = loader.ui_nodes[id];
+          cached_dest_desc = "➔ " + live_dst_code + " (" + apt.city + ")";
+          cached_dest_valid = true;
+        } else if (!dest_str.empty()) {
+          cached_dest_desc = "⚠️ Not found";
+          cached_dest_valid = false;
+        } else {
+          cached_dest_desc = "Type city, country or code";
+          cached_dest_valid = false;
+        }
       }
+      const std::string &dest_desc = cached_dest_desc;
+      bool dest_valid = cached_dest_valid;
 
       // ---------------------------------------------------------------------
       // TOP BRANDING BAR & UTILITY TOGGLES

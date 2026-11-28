@@ -202,8 +202,8 @@ public:
       const std::string &target_date, const DataLoader &loader,
       uint32_t source_id, uint32_t dest_id,
       const std::vector<AlgorithmBenchmark> &benchmarks,
-      const RoutingResult &yen_best, const std::string &yen_reason,
-      double yen_gen_cost, const std::vector<RoutingResult> &yen_k_paths) {
+      const RoutingResult &alt_best, const std::string &alt_reason,
+      double alt_gen_cost, const std::vector<RoutingResult> &alt_k_paths) {
 
     using namespace ftxui;
 
@@ -228,8 +228,8 @@ public:
                 text(" "),
             }),
             separatorLight(),
-            text(" Profiling 14+ Algorithms: Dynamic Programming, Heuristics, "
-                 "Exact Solvers, Metaheuristics, & Hierarchies.") |
+            text(" Profiling Fast Routing Algorithms: Dynamic Programming, "
+                 "Heuristics, Multiple ALT, & Hierarchies.") |
                 dim,
         })) |
         color(Color::Cyan);
@@ -351,29 +351,29 @@ public:
                             vbox(std::move(visual_gauges))) |
                      color(Color::YellowLight);
 
-    // 4. Yen's K-SP Recommendation & Trade-off Analysis
-    Element yen_box;
-    if (yen_best.success) {
+    // 4. Multiple ALT Recommendation & Trade-off Analysis
+    Element multi_alt_box;
+    if (alt_best.success) {
       std::ostringstream oss;
-      oss << "Recommended: $" << yen_best.total_price << " ("
-          << format_duration(yen_best.total_time_mins) << ", "
-          << (yen_best.path.empty() ? 0 : yen_best.path.size() - 1)
-          << " transits) | Reason: " << yen_reason;
+      oss << "Recommended: $" << alt_best.total_price << " ("
+          << format_duration(alt_best.total_time_mins) << ", "
+          << (alt_best.path.empty() ? 0 : alt_best.path.size() - 1)
+          << " transits) | Reason: " << alt_reason;
 
       std::ostringstream oss_gen;
       oss_gen << "Generalized Economic Cost: $" << std::fixed
-              << std::setprecision(2) << yen_gen_cost
+              << std::setprecision(2) << alt_gen_cost
               << " (Value of Time: $25.00/hr, Layover Penalty: $15/stop)";
 
-      std::vector<Element> yen_rows;
-      yen_rows.push_back(text(oss.str()) | bold | color(Color::GreenLight));
-      yen_rows.push_back(text(oss_gen.str()) | color(Color::YellowLight));
-      yen_rows.push_back(separatorLight());
+      std::vector<Element> alt_rows;
+      alt_rows.push_back(text(oss.str()) | bold | color(Color::GreenLight));
+      alt_rows.push_back(text(oss_gen.str()) | color(Color::YellowLight));
+      alt_rows.push_back(separatorLight());
 
-      for (size_t i = 0; i < yen_k_paths.size(); ++i) {
-        const auto &res = yen_k_paths[i];
+      for (size_t i = 0; i < alt_k_paths.size(); ++i) {
+        const auto &res = alt_k_paths[i];
         std::string r_str = build_route_summary(res, loader, source_id);
-        yen_rows.push_back(hbox({
+        alt_rows.push_back(hbox({
             text("Alt #" + std::to_string(i + 1) + ": ") | bold |
                 color(Color::White),
             text("$" + std::to_string(res.total_price)) | bold |
@@ -386,11 +386,11 @@ public:
         }));
       }
 
-      yen_box = window(text(" YEN'S K-SHORTEST PATH RECOMMENDATION & ECONOMIC "
-                            "ANALYSIS ") |
-                           bold | color(Color::MagentaLight),
-                       vbox(std::move(yen_rows))) |
-                color(Color::MagentaLight);
+      multi_alt_box =
+          window(text(" MULTIPLE ALT RECOMMENDATIONS & ECONOMIC ANALYSIS ") |
+                     bold | color(Color::MagentaLight),
+                 vbox(std::move(alt_rows))) |
+          color(Color::MagentaLight);
     }
 
     // Assembly
@@ -398,10 +398,10 @@ public:
     main_layout.push_back(header_box);
     main_layout.push_back(table_box);
     main_layout.push_back(gauge_box);
-    if (yen_best.success) {
-      main_layout.push_back(yen_box);
+    if (alt_best.success) {
+      main_layout.push_back(multi_alt_box);
       main_layout.push_back(FlightPlanner::TUI::WorldMap::build_route_map(
-          yen_best, loader, source_id));
+          alt_best, loader, source_id));
     }
 
     auto document = vbox(std::move(main_layout));

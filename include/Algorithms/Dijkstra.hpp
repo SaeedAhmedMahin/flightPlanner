@@ -107,23 +107,21 @@ public:
         continue;
       }
 
-      for (const flight &edge : adjacency_list[current.node_id]) {
+      const uint32_t required_departure =
+          (current.node_id == source_id)
+              ? current.current_time
+              : (current.current_time + nodes[current.node_id].min_transfer);
+      const int32_t origin_utc_offset = nodes[current.node_id].utc_offset_15m * 15;
+      auto day_range = get_flight_day_range(
+          adjacency_list[current.node_id], current.current_time,
+          required_departure, origin_utc_offset);
+
+      for (auto it = day_range.begin; it != day_range.end; ++it) {
+        const flight &edge = *it;
         metrics.edges_relaxed++;
         uint32_t next_node = edge.destination_id;
 
-        // Minimum time we must depart from this airport in UTC: passenger needs time
-        // to clear the gate or security for a transfer. Source has no transfer
-        // time (we are already at the departure terminal at query time).
-        uint32_t required_departure =
-            current.current_time + nodes[current.node_id].min_transfer;
-
-        // The first node has no transfer time required
-        if (current.node_id == source_id) {
-          required_departure = current.current_time;
-        }
-
         // Flight departure in unified UTC minutes
-        int32_t origin_utc_offset = nodes[current.node_id].utc_offset_15m * 15;
         uint32_t absolute_flight_departure = static_cast<uint32_t>(
             static_cast<int32_t>(edge.flight_day * 1440 + edge.departure_time) -
             origin_utc_offset);

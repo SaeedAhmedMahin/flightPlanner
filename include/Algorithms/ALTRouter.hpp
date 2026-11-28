@@ -4,12 +4,16 @@
 #include "../DataStructures/flight.hpp"
 #include "Dijkstra.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <iostream>
 #include <limits>
 #include <queue>
 #include <random>
+#include <string>
+#include <unordered_set>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -249,6 +253,86 @@ public:
     return max_h;
   }
 
+  enum class ObjectiveMode { PRICE, TIME, BALANCED };
+
+  struct SearchPenalties {
+    const std::unordered_set<uint32_t> *penalized_flights = nullptr;
+    const std::unordered_set<uint32_t> *blocked_first_flights = nullptr;
+    const std::vector<uint16_t> *hub_penalties = nullptr;
+    const std::array<uint16_t, 256> *airline_penalties = nullptr;
+    uint32_t flight_penalty = 450;
+  };
+
+  struct SearchWorkspace {
+    std::vector<std::vector<ParetoPoint>> pareto_labels;
+    std::vector<uint32_t> touched_nodes;
+    std::vector<Label> all_labels;
+    Flat4AryMinHeap<ALTState, CompareALT> pq{65536};
+
+    void prepare(size_t num_nodes) {
+      if (pareto_labels.size() < num_nodes) {
+        pareto_labels.resize(num_nodes);
+      } else {
+        for (uint32_t u : touched_nodes) {
+          pareto_labels[u].clear();
+        }
+      }
+      touched_nodes.clear();
+      all_labels.clear();
+      if (all_labels.capacity() < 16384) {
+        all_labels.reserve(16384);
+      }
+      pq.clear();
+    }
+
+    inline void add_pareto(uint32_t node_id, const ParetoPoint &pt) {
+      if (pareto_labels[node_id].empty()) {
+        touched_nodes.push_back(node_id);
+      }
+      pareto_labels[node_id].push_back(pt);
+    }
+  };
+
+  struct DiverseKResult {
+    std::vector<RoutingResult> paths;
+    RoutingResult best_recommendation;
+    double generalized_cost = 0.0;
+    std::string recommendation_reason;
+    RoutingMetrics total_metrics = {0, 0};
+  };
+
+  static inline uint32_t compute_objective_h(uint32_t u, uint32_t dest,
+                                             const LandmarkData &data,
+                                             ObjectiveMode obj) {
+    if (obj == ObjectiveMode::PRICE) {
+      return compute_alt_h(u, dest, data, OptimizeFor::PRICE);
+    }
+    if (obj == ObjectiveMode::TIME) {
+      return compute_alt_h(u, dest, data, OptimizeFor::TIME);
+    }
+    // Admissible lower bound for price + 0.35 * elapsed_mins
+    uint32_t h_p = compute_alt_h(u, dest, data, OptimizeFor::PRICE);
+    uint32_t h_t = compute_alt_h(u, dest, data, OptimizeFor::TIME);
+    return h_p + (h_t * 35u) / 100u;
+  }
+
+  static double calculate_generalized_cost(const RoutingResult &r) {
+    if (!r.success || r.path.empty()) return 1e12;
+    double price = static_cast<double>(r.total_price);
+    constexpr double VOT_PER_MIN = 25.0 / 60.0;
+    double time_cost = static_cast<double>(r.total_time_mins) * VOT_PER_MIN;
+    double num_transits =
+        (r.path.size() > 1) ? static_cast<double>(r.path.size() - 1) : 0.0;
+    double layover_penalty = num_transits * 15.0;
+    double schedule_penalty = 0.0;
+    for (const flight &f : r.path) {
+      if (f.departure_time >= 1380 || f.departure_time < 300) {
+        schedule_penalty += 20.0;
+      }
+    }
+    return price + time_cost + layover_penalty + schedule_penalty;
+  }
+
   RoutingResult run(uint32_t source_id, uint32_t dest_id,
                     const std::vector<std::vector<flight>> &adjacency_list,
                     const std::vector<airport> &nodes,
@@ -258,11 +342,40 @@ public:
                     const std::vector<std::vector<uint16_t>> &static_min_duration,
                     LandmarkData &landmark_data, OptimizeFor mode,
                     uint32_t start_time, uint8_t max_hops = 5) {
+    if (!landmark_data.is_preprocessed) {
+      preprocess(nodes, static_graph, reverse_static_graph,
+                 static_min_price, static_min_duration, landmark_data);
+    }
+    SearchWorkspace ws;
+    SearchPenalties no_penalties;
+    ObjectiveMode obj =
+        (mode == OptimizeFor::PRICE) ? ObjectiveMode::PRICE : ObjectiveMode::TIME;
+    return run_with_config(source_id, dest_id, adjacency_list, nodes,
+                           landmark_data, obj, start_time, max_hops,
+                           no_penalties, ws, false, true);
+  }
 
-    RoutingMetrics metrics = {0, 0};
+  // Runs multiple diversified ALT searches (Price, Time, Balanced, departure
+  // windows, and non-negative edge/hub/airline penalties) to produce top
+  // alternative itineraries orders of magnitude faster than Yen's K-SP.
+  DiverseKResult run_k_diverse(
+      uint32_t source_id, uint32_t dest_id,
+      const std::vector<std::vector<flight>> &adjacency_list,
+      const std::vector<airport> &nodes,
+      const std::vector<std::vector<uint32_t>> &static_graph,
+      const std::vector<std::vector<uint32_t>> &reverse_static_graph,
+      const std::vector<std::vector<uint16_t>> &static_min_price,
+      const std::vector<std::vector<uint16_t>> &static_min_duration,
+      LandmarkData &landmark_data, uint32_t start_time, uint32_t K = 12,
+      uint8_t max_hops = 5, uint32_t date_start_utc = 0) {
 
+    DiverseKResult out;
     if (source_id == dest_id) {
-      return {true, 0, 0, {}, metrics};
+      RoutingResult r = {true, 0, 0, {}, {0, 0}};
+      out.paths.push_back(r);
+      out.best_recommendation = r;
+      out.recommendation_reason = "Source is destination";
+      return out;
     }
 
     if (!landmark_data.is_preprocessed) {
@@ -270,33 +383,213 @@ public:
                  static_min_price, static_min_duration, landmark_data);
     }
 
+    if (date_start_utc == 0) {
+      date_start_utc = start_time;
+    }
+
+    const size_t num_nodes = adjacency_list.size();
+    SearchWorkspace ws;
+    std::unordered_set<std::string> seen_paths;
+    std::unordered_set<uint32_t> penalized_flights;
+    std::unordered_set<uint32_t> blocked_first_flights;
+    std::vector<uint16_t> hub_penalties(num_nodes, 0);
+    std::array<uint16_t, 256> airline_penalties{};
+
+    auto serialize_path = [](const std::vector<flight> &path) {
+      std::string s;
+      s.reserve(path.size() * 12);
+      for (const auto &f : path) {
+        s += std::to_string(f.flight_details_id);
+        s.push_back(';');
+      }
+      return s;
+    };
+
+    auto record_result = [&](RoutingResult &res) -> bool {
+      out.total_metrics.nodes_explored += res.metrics.nodes_explored;
+      out.total_metrics.edges_relaxed += res.metrics.edges_relaxed;
+      if (!res.success || res.path.empty()) return false;
+
+      std::string key = serialize_path(res.path);
+      if (!seen_paths.insert(key).second) {
+        // Collision on an earlier path: block its departing flight for later passes
+        blocked_first_flights.insert(res.path.front().flight_details_id);
+        return false;
+      }
+
+      for (size_t idx = 0; idx < res.path.size(); ++idx) {
+        const flight &f = res.path[idx];
+        penalized_flights.insert(f.flight_details_id);
+        uint16_t &ap = airline_penalties[f.airline_id];
+        if (ap < 400) ap = static_cast<uint16_t>(ap + 65);
+        if (idx + 1 < res.path.size() && f.destination_id < num_nodes) {
+          uint16_t &hp = hub_penalties[f.destination_id];
+          if (hp < 800) hp = static_cast<uint16_t>(hp + 160);
+        }
+      }
+
+      out.paths.push_back(std::move(res));
+      return true;
+    };
+
+    // Build departure-window probe timestamps anchored within the selected day
+    std::vector<uint32_t> window_starts;
+    window_starts.push_back(start_time);
+    const uint32_t max_window_start =
+        std::max(start_time, date_start_utc + 1200);
+    for (uint32_t offset : {360u, 660u, 960u, 1200u}) {
+      uint32_t cand = date_start_utc + offset;
+      if (cand > start_time && cand <= max_window_start) {
+        if (cand - window_starts.back() >= 180) {
+          window_starts.push_back(cand);
+        }
+      }
+    }
+
+    SearchPenalties no_penalties;
+    SearchPenalties div_penalties{&penalized_flights, &blocked_first_flights,
+                                  &hub_penalties, &airline_penalties, 450};
+
+    // Phase 1: Pure optimal baselines (Cheapest, Fastest, Balanced Best-Value)
+    for (ObjectiveMode obj :
+         {ObjectiveMode::PRICE, ObjectiveMode::TIME, ObjectiveMode::BALANCED}) {
+      RoutingResult r = run_with_config(
+          source_id, dest_id, adjacency_list, nodes, landmark_data, obj,
+          start_time, max_hops, no_penalties, ws, true, true);
+      record_result(r);
+    }
+
+    // Phase 2: Departure-window sweeps to capture morning/afternoon/evening options
+    for (size_t wi = 1; wi < window_starts.size() && out.paths.size() < K; ++wi) {
+      RoutingResult r = run_with_config(
+          source_id, dest_id, adjacency_list, nodes, landmark_data,
+          ObjectiveMode::BALANCED, window_starts[wi], max_hops, div_penalties,
+          ws, true, true);
+      record_result(r);
+    }
+
+    // Phase 3: Iterative penalized ALT across objectives & windows until K paths
+    const uint32_t max_extra_passes = std::max<uint32_t>(K + 6, 16);
+    uint32_t consecutive_misses = 0;
+    for (uint32_t p = 0;
+         p < max_extra_passes && out.paths.size() < K && consecutive_misses < 5;
+         ++p) {
+      ObjectiveMode obj = (p % 3 == 0)
+                              ? ObjectiveMode::PRICE
+                              : (p % 3 == 1 ? ObjectiveMode::BALANCED
+                                            : ObjectiveMode::TIME);
+      uint32_t pass_start = window_starts[p % window_starts.size()];
+      div_penalties.flight_penalty = 450 + p * 150;
+
+      RoutingResult r = run_with_config(
+          source_id, dest_id, adjacency_list, nodes, landmark_data, obj,
+          pass_start, max_hops, div_penalties, ws, true, true);
+      if (record_result(r)) {
+        consecutive_misses = 0;
+      } else {
+        consecutive_misses++;
+      }
+    }
+
+    // Order itineraries with Google-Flights-style Best Value first
+    std::sort(out.paths.begin(), out.paths.end(),
+              [](const RoutingResult &a, const RoutingResult &b) {
+                double ga = calculate_generalized_cost(a);
+                double gb = calculate_generalized_cost(b);
+                if (std::abs(ga - gb) > 1e-6) return ga < gb;
+                if (a.total_price != b.total_price)
+                  return a.total_price < b.total_price;
+                return a.total_time_mins < b.total_time_mins;
+              });
+
+    if (!out.paths.empty()) {
+      const RoutingResult *cheapest = &out.paths[0];
+      const RoutingResult *fastest = &out.paths[0];
+      const RoutingResult *best_p = &out.paths[0];
+      double best_gc = calculate_generalized_cost(out.paths[0]);
+
+      for (const auto &p : out.paths) {
+        if (p.total_price < cheapest->total_price) cheapest = &p;
+        if (p.total_time_mins < fastest->total_time_mins) fastest = &p;
+        double gc = calculate_generalized_cost(p);
+        if (gc < best_gc) {
+          best_gc = gc;
+          best_p = &p;
+        }
+      }
+
+      out.best_recommendation = *best_p;
+      out.generalized_cost = best_gc;
+
+      double time_saved_hours =
+          (cheapest->total_time_mins > best_p->total_time_mins)
+              ? (cheapest->total_time_mins - best_p->total_time_mins) / 60.0
+              : 0.0;
+      double price_diff = static_cast<double>(best_p->total_price) -
+                          static_cast<double>(cheapest->total_price);
+      double price_pct =
+          (cheapest->total_price > 0)
+              ? (price_diff / static_cast<double>(cheapest->total_price)) * 100.0
+              : 0.0;
+
+      if (best_p == cheapest && best_p == fastest) {
+        out.recommendation_reason =
+            "Optimal on both price and time (Dominant choice).";
+      } else if (best_p == cheapest) {
+        out.recommendation_reason =
+            "Cheapest flight with best value; faster options do not justify their price premium.";
+      } else {
+        char buf[256];
+        std::snprintf(
+            buf, sizeof(buf),
+            "Saves %.1fh of travel time for just +$%.0f (+%.1f%%) vs cheapest (Value of Time trade-off).",
+            time_saved_hours, price_diff, price_pct);
+        out.recommendation_reason = buf;
+      }
+    } else {
+      out.best_recommendation = {false, 0, 0, {}, out.total_metrics};
+      out.recommendation_reason = "No route found";
+    }
+
+    return out;
+  }
+
+private:
+  RoutingResult run_with_config(
+      uint32_t source_id, uint32_t dest_id,
+      const std::vector<std::vector<flight>> &adjacency_list,
+      const std::vector<airport> &nodes, const LandmarkData &landmark_data,
+      ObjectiveMode obj, uint32_t start_time, uint8_t max_hops,
+      const SearchPenalties &penalties, SearchWorkspace &ws,
+      bool actual_journey_duration, bool sorted_by_day) {
+
+    RoutingMetrics metrics = {0, 0};
+
+    if (source_id == dest_id) {
+      return {true, 0, 0, {}, metrics};
+    }
+
     uint32_t num_nodes = static_cast<uint32_t>(adjacency_list.size());
-    std::vector<std::vector<ParetoPoint>> pareto_labels(num_nodes);
+    ws.prepare(num_nodes);
 
-    std::vector<Label> all_labels;
-    all_labels.reserve(65536);
+    uint32_t h_start = compute_objective_h(source_id, dest_id, landmark_data, obj);
+    int32_t source_label_id = static_cast<int32_t>(ws.all_labels.size());
+    ws.all_labels.push_back(Label{source_id, 0, start_time, -1, flight{}, 0});
+    ws.add_pareto(source_id, {0, start_time, 0});
 
-    Flat4AryMinHeap<ALTState, CompareALT> pq(65536);
+    ws.pq.push({start_time, source_label_id, h_start, 0,
+                static_cast<uint16_t>(source_id), 0, 0});
 
-    uint32_t h_start = compute_alt_h(source_id, dest_id, landmark_data, mode);
-    int32_t source_label_id = static_cast<int32_t>(all_labels.size());
-    all_labels.push_back(Label{source_id, 0, start_time, -1, flight{}, 0});
-    pareto_labels[source_id].push_back({0, start_time, 0});
-
-    pq.push({start_time, source_label_id, h_start, 0,
-             static_cast<uint16_t>(source_id), 0, 0});
-
-    while (!pq.empty()) {
-      ALTState current = pq.top();
-      pq.pop();
+    while (!ws.pq.empty()) {
+      ALTState current = ws.pq.top();
+      ws.pq.pop();
       metrics.nodes_explored++;
 
       if (current.node_id == dest_id) {
-        // Reconstruct path
         std::vector<flight> path;
         int32_t curr_lbl_id = current.label_id;
         while (curr_lbl_id != -1) {
-          const Label &lbl = all_labels[curr_lbl_id];
+          const Label &lbl = ws.all_labels[curr_lbl_id];
           if (lbl.parent_label_id != -1) {
             path.push_back(lbl.edge_taken);
           }
@@ -304,21 +597,26 @@ public:
         }
         std::reverse(path.begin(), path.end());
 
-        uint32_t total_price = all_labels[current.label_id].cost;
+        uint32_t total_price = 0;
+        for (const auto &f : path) total_price += f.price;
+
         uint32_t total_time = current.current_time - start_time;
-        if (mode == OptimizeFor::TIME) {
-          // In time mode, cost in Label is travel time
-          total_price = 0;
-          for (const auto &f : path) total_price += f.price;
+        if (actual_journey_duration && !path.empty()) {
+          int32_t src_utc_offset = nodes[source_id].utc_offset_15m * 15;
+          uint32_t first_dep_utc = static_cast<uint32_t>(
+              static_cast<int32_t>(path.front().flight_day * 1440 +
+                                   path.front().departure_time) -
+              src_utc_offset);
+          total_time = current.current_time - first_dep_utc;
         }
         return {true, total_price, total_time, std::move(path), metrics};
       }
 
-      // Stale state check
-      const Label &curr_label = all_labels[current.label_id];
+      const Label &curr_label = ws.all_labels[current.label_id];
       if (is_strictly_dominated(current.node_id, dest_id,
-                                pareto_labels[current.node_id], curr_label.cost,
-                                curr_label.arrival_time, current.hops)) {
+                                ws.pareto_labels[current.node_id],
+                                curr_label.cost, curr_label.arrival_time,
+                                current.hops)) {
         continue;
       }
 
@@ -326,60 +624,104 @@ public:
         continue;
       }
 
-      for (const flight &edge : adjacency_list[current.node_id]) {
+      const int32_t origin_utc_offset = nodes[current.node_id].utc_offset_15m * 15;
+      const int64_t curr_utc = static_cast<int32_t>(current.current_time);
+      const int64_t req_dep_i =
+          (current.node_id == source_id)
+              ? curr_utc
+              : (curr_utc + nodes[current.node_id].min_transfer);
+
+      const auto &edges = adjacency_list[current.node_id];
+      auto it = edges.begin();
+      int64_t max_day_i = (curr_utc + 1440 + origin_utc_offset) / 1440;
+      if (sorted_by_day) {
+        int64_t min_local = req_dep_i + origin_utc_offset;
+        uint16_t min_day =
+            (min_local > 0) ? static_cast<uint16_t>(min_local / 1440) : 0;
+        it = std::lower_bound(
+            edges.begin(), edges.end(), min_day,
+            [](const flight &f, uint16_t d) { return f.flight_day < d; });
+      }
+
+      for (; it != edges.end(); ++it) {
+        const flight &edge = *it;
+        if (sorted_by_day && max_day_i >= 0 &&
+            edge.flight_day > static_cast<uint16_t>(max_day_i)) {
+          break;
+        }
         metrics.edges_relaxed++;
+
+        if (current.node_id == source_id &&
+            penalties.blocked_first_flights &&
+            penalties.blocked_first_flights->count(edge.flight_details_id)) {
+          continue;
+        }
+
+        int64_t abs_dep_i = static_cast<int64_t>(edge.flight_day) * 1440 +
+                            edge.departure_time - origin_utc_offset;
+        if (abs_dep_i < req_dep_i) {
+          continue;
+        }
+        int64_t wait_i = abs_dep_i - curr_utc;
+        if (wait_i > 1440) {
+          continue;
+        }
+
         uint32_t next_node = edge.destination_id;
+        uint32_t next_time = static_cast<uint32_t>(abs_dep_i + edge.duration_mins);
+        uint32_t step_elapsed = next_time - current.current_time;
 
-        uint32_t req_dep =
-            current.current_time + nodes[current.node_id].min_transfer;
-        if (current.node_id == source_id) {
-          req_dep = current.current_time;
+        uint32_t penalty = 0;
+        if (penalties.penalized_flights &&
+            penalties.penalized_flights->count(edge.flight_details_id)) {
+          penalty += penalties.flight_penalty;
+        }
+        if (penalties.hub_penalties && next_node != dest_id &&
+            next_node < penalties.hub_penalties->size()) {
+          penalty += (*penalties.hub_penalties)[next_node];
+        }
+        if (penalties.airline_penalties) {
+          penalty += (*penalties.airline_penalties)[edge.airline_id];
         }
 
-        int32_t origin_utc_offset = nodes[current.node_id].utc_offset_15m * 15;
-        uint32_t abs_dep = static_cast<uint32_t>(
-            static_cast<int32_t>(edge.flight_day * 1440 + edge.departure_time) -
-            origin_utc_offset);
-
-        if (abs_dep < req_dep) {
-          continue;
+        uint32_t new_g = 0;
+        if (obj == ObjectiveMode::PRICE) {
+          new_g = current.g_score + edge.price + penalty;
+        } else if (obj == ObjectiveMode::TIME) {
+          new_g = current.g_score + step_elapsed + penalty;
+        } else {
+          uint32_t layover_pen = (current.hops > 0) ? 65u : 0u;
+          new_g = current.g_score + edge.price + (step_elapsed * 35u) / 100u +
+                  layover_pen + penalty;
         }
-        if (abs_dep - current.current_time > 1440) {
-          continue;
-        }
-
-        uint32_t next_time = abs_dep + edge.duration_mins;
-        uint32_t new_g = (mode == OptimizeFor::PRICE)
-                             ? (current.g_score + edge.price)
-                             : (next_time - start_time);
 
         uint8_t next_hops = current.hops + 1;
 
-        if (is_dominated(next_node, dest_id, pareto_labels[next_node], new_g,
+        if (is_dominated(next_node, dest_id, ws.pareto_labels[next_node], new_g,
                          next_time, next_hops)) {
           continue;
         }
 
-        prune_dominated(next_node, dest_id, pareto_labels[next_node], new_g,
+        prune_dominated(next_node, dest_id, ws.pareto_labels[next_node], new_g,
                         next_time, next_hops);
-        pareto_labels[next_node].push_back({new_g, next_time, next_hops});
+        ws.add_pareto(next_node, {new_g, next_time, next_hops});
 
-        int32_t new_label_id = static_cast<int32_t>(all_labels.size());
-        all_labels.push_back(Label{next_node, new_g, next_time,
-                                   current.label_id, edge, next_hops});
+        int32_t new_label_id = static_cast<int32_t>(ws.all_labels.size());
+        ws.all_labels.push_back(Label{next_node, new_g, next_time,
+                                      current.label_id, edge, next_hops});
 
-        uint32_t h_next = compute_alt_h(next_node, dest_id, landmark_data, mode);
+        uint32_t h_next =
+            compute_objective_h(next_node, dest_id, landmark_data, obj);
         uint32_t next_f = new_g + h_next;
 
-        pq.push({next_time, new_label_id, next_f, new_g,
-                 static_cast<uint16_t>(next_node), next_hops, 0});
+        ws.pq.push({next_time, new_label_id, next_f, new_g,
+                    static_cast<uint16_t>(next_node), next_hops, 0});
       }
     }
 
     return {false, 0, 0, {}, metrics};
   }
 
-private:
   bool is_dominated(uint32_t node_id, uint32_t dest_id,
                     const std::vector<ParetoPoint> &labels, uint32_t cost,
                     uint32_t time, uint8_t hops) const {
@@ -397,7 +739,8 @@ private:
                              const std::vector<ParetoPoint> &labels,
                              uint32_t cost, uint32_t time, uint8_t hops) const {
     for (const ParetoPoint &p : labels) {
-      if (p.cost < cost && p.arrival_time < time && p.hops <= hops) {
+      if (p.cost <= cost && p.arrival_time <= time && p.hops <= hops &&
+          (p.cost < cost || p.arrival_time < time || p.hops < hops)) {
         if (node_id == dest_id || (time - p.arrival_time <= 1440)) {
           return true;
         }

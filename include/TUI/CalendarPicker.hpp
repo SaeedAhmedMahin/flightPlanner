@@ -73,8 +73,8 @@ public:
 
   static void parse_date_iso(const std::string &str, int &y, int &m, int &d) {
     if (std::sscanf(str.c_str(), "%d-%d-%d", &y, &m, &d) != 3) {
-      y = 2026;
-      m = 11;
+      y = 2027;
+      m = 2;
       d = 15;
     }
     if (m < 1)
@@ -89,17 +89,22 @@ public:
   }
 
   // State
-  int viewing_year = 2026;
-  int viewing_month = 11;
-  int selected_year = 2026;
-  int selected_month = 11;
+  int viewing_year = 2027;
+  int viewing_month = 2;
+  int selected_year = 2027;
+  int selected_month = 2;
   int selected_day = 15;
 
-  bool has_min_date = false;
-  int min_year = 2026;
-  int min_month = 10;
+  bool has_min_date = true;
+  int min_year = 2027;
+  int min_month = 2;
   int min_day = 1;
-  std::string min_date_iso;
+  std::string min_date_iso = "2027-02-01";
+
+  // Dataset upper bound: Dec 31, 2027
+  int max_year = 2027;
+  int max_month = 12;
+  int max_day = 31;
 
   std::string target_label = "Select Date";
   bool is_open = false;
@@ -107,6 +112,8 @@ public:
   std::vector<ftxui::Box> interactive_boxes;
 
   bool is_day_disabled(int y, int m, int d) const {
+    if (y > max_year || (y == max_year && (m > max_month || (m == max_month && d > max_day))))
+      return true;
     if (!has_min_date)
       return false;
     if (y != min_year)
@@ -193,9 +200,9 @@ public:
         " Year ▶ ", [this] { viewing_year++; }, ButtonOption::Ascii());
 
     today_btn = Button(
-        " Nov 15, 2026 ",
+        " Feb 15, 2027 ",
         [this] {
-          int ty = 2026, tm = 11, td = 15;
+          int ty = 2027, tm = 2, td = 15;
           if (is_day_disabled(ty, tm, td)) {
             ty = min_year;
             tm = min_month;
@@ -251,11 +258,11 @@ public:
             const std::string &min_iso = "") {
     target_label = label;
     on_date_selected = std::move(callback);
-    min_date_iso = min_iso;
-    has_min_date = !min_iso.empty();
-    if (has_min_date) {
-      parse_date_iso(min_iso, min_year, min_month, min_day);
-    }
+    min_date_iso = min_iso.empty() ? "2027-02-01" : min_iso;
+    if (min_date_iso < "2027-02-01")
+      min_date_iso = "2027-02-01";
+    has_min_date = true;
+    parse_date_iso(min_date_iso, min_year, min_month, min_day);
 
     parse_date_iso(initial_date_iso, selected_year, selected_month, selected_day);
     if (is_day_disabled(selected_year, selected_month, selected_day)) {
