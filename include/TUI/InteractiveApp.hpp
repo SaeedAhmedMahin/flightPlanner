@@ -768,16 +768,16 @@ public:
     }
 
     ALTRouter alt_router;
-    auto alt_multi_start = std::chrono::high_resolution_clock::now();
-    ALTRouter::DiverseKResult diverse_res = alt_router.run_k_diverse(
-        src_id, dst_id, loader.adjacency_list, loader.nodes,
-        loader.static_route_graph, loader.reverse_static_graph,
-        loader.static_route_min_price, loader.static_route_min_duration,
-        alt_landmark_data, absolute_start_time, 12, 5, date_start_utc);
-    multiple_alt_compute_us =
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::high_resolution_clock::now() - alt_multi_start)
-            .count();
+    long alt_wall_us = 0;
+    ALTRouter::DiverseKResult diverse_res;
+    {
+      Profiler::ScopedTimer timer(multiple_alt_compute_us, alt_wall_us);
+      diverse_res = alt_router.run_k_diverse(
+          src_id, dst_id, loader.adjacency_list, loader.nodes,
+          loader.static_route_graph, loader.reverse_static_graph,
+          loader.static_route_min_price, loader.static_route_min_duration,
+          alt_landmark_data, absolute_start_time, 12, 5, date_start_utc);
+    }
 
     return std::move(diverse_res.paths);
   }
@@ -817,268 +817,172 @@ public:
 
     // Dijkstra
     Dijkstra dijkstra_router;
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = dijkstra_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-          OptimizeFor::PRICE, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Dijkstra", "cheapest", dur.count(), res});
-    }
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = dijkstra_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-          OptimizeFor::TIME, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Dijkstra", "fastest", dur.count(), res});
-    }
+    Profiler::record(researcher_benchmarks, "Dijkstra", "cheapest", [&] {
+      return dijkstra_router.run(active_source_id, active_dest_id,
+                                 loader.adjacency_list, loader.nodes,
+                                 OptimizeFor::PRICE, absolute_start_time);
+    });
+    Profiler::record(researcher_benchmarks, "Dijkstra", "fastest", [&] {
+      return dijkstra_router.run(active_source_id, active_dest_id,
+                                 loader.adjacency_list, loader.nodes,
+                                 OptimizeFor::TIME, absolute_start_time);
+    });
 
     // A*
     AStar astar_router;
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = astar_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-          OptimizeFor::PRICE, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back({"A*", "cheapest", dur.count(), res});
-    }
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = astar_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-          OptimizeFor::TIME, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back({"A*", "fastest", dur.count(), res});
-    }
+    Profiler::record(researcher_benchmarks, "A*", "cheapest", [&] {
+      return astar_router.run(active_source_id, active_dest_id,
+                              loader.adjacency_list, loader.nodes,
+                              OptimizeFor::PRICE, absolute_start_time);
+    });
+    Profiler::record(researcher_benchmarks, "A*", "fastest", [&] {
+      return astar_router.run(active_source_id, active_dest_id,
+                              loader.adjacency_list, loader.nodes,
+                              OptimizeFor::TIME, absolute_start_time);
+    });
 
     // ALT
     ALTRouter alt_router;
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = alt_router.run(
+    Profiler::record(researcher_benchmarks, "ALT", "cheapest", [&] {
+      return alt_router.run(
           active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
           loader.static_route_graph, loader.reverse_static_graph,
           loader.static_route_min_price, loader.static_route_min_duration,
           alt_landmark_data, OptimizeFor::PRICE, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back({"ALT", "cheapest", dur.count(), res});
-    }
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = alt_router.run(
+    });
+    Profiler::record(researcher_benchmarks, "ALT", "fastest", [&] {
+      return alt_router.run(
           active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
           loader.static_route_graph, loader.reverse_static_graph,
           loader.static_route_min_price, loader.static_route_min_duration,
           alt_landmark_data, OptimizeFor::TIME, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back({"ALT", "fastest", dur.count(), res});
-    }
+    });
 
     // RC-A*
     RCAStarRouter rcastar_router;
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = rcastar_router.run(
+    Profiler::record(researcher_benchmarks, "RC-A*", "cheapest", [&] {
+      return rcastar_router.run(
           active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
           OptimizeFor::PRICE, absolute_start_time,
           RCAStarRouter::ResourceConstraints{2880, 50000, 5});
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back({"RC-A*", "cheapest", dur.count(), res});
-    }
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = rcastar_router.run(
+    });
+    Profiler::record(researcher_benchmarks, "RC-A*", "fastest", [&] {
+      return rcastar_router.run(
           active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
           OptimizeFor::TIME, absolute_start_time,
           RCAStarRouter::ResourceConstraints{2880, 50000, 5});
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back({"RC-A*", "fastest", dur.count(), res});
-    }
+    });
 
     // Contraction Hierarchies
     ContractionHierarchiesRouter ch_router;
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = ch_router.run(
+    Profiler::record(researcher_benchmarks, "Contraction H.", "cheapest", [&] {
+      return ch_router.run(
           active_source_id, active_dest_id, loader.adjacency_list,
           loader.static_route_graph, loader.static_route_min_price,
           loader.static_route_min_duration, loader.nodes, OptimizeFor::PRICE,
           absolute_start_time, ch_graph_price);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Contraction H.", "cheapest", dur.count(), res});
-    }
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = ch_router.run(
+    });
+    Profiler::record(researcher_benchmarks, "Contraction H.", "fastest", [&] {
+      return ch_router.run(
           active_source_id, active_dest_id, loader.adjacency_list,
           loader.static_route_graph, loader.static_route_min_price,
           loader.static_route_min_duration, loader.nodes, OptimizeFor::TIME,
           absolute_start_time, ch_graph_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Contraction H.", "fastest", dur.count(), res});
-    }
+    });
 
     // Lagrangian Relaxation
     LagrangianRelaxationRouter lr_router;
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = lr_router.run(
+    Profiler::record(researcher_benchmarks, "Lagrangian", "cheapest", [&] {
+      return lr_router.run(
           active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
           OptimizeFor::PRICE, absolute_start_time,
           LagrangianRelaxationRouter::ResourceConstraints{2880, 50000, 5});
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Lagrangian", "cheapest", dur.count(), res});
-    }
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = lr_router.run(
+    });
+    Profiler::record(researcher_benchmarks, "Lagrangian", "fastest", [&] {
+      return lr_router.run(
           active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
           OptimizeFor::TIME, absolute_start_time,
           LagrangianRelaxationRouter::ResourceConstraints{2880, 50000, 5});
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Lagrangian", "fastest", dur.count(), res});
-    }
+    });
 
     // Column Generation
     ColumnGenerationRouter cg_router;
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = cg_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-          OptimizeFor::PRICE, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Column-Gen", "cheapest", dur.count(), res});
-    }
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = cg_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-          OptimizeFor::TIME, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Column-Gen", "fastest", dur.count(), res});
-    }
+    Profiler::record(researcher_benchmarks, "Column-Gen", "cheapest", [&] {
+      return cg_router.run(active_source_id, active_dest_id,
+                           loader.adjacency_list, loader.nodes,
+                           OptimizeFor::PRICE, absolute_start_time);
+    });
+    Profiler::record(researcher_benchmarks, "Column-Gen", "fastest", [&] {
+      return cg_router.run(active_source_id, active_dest_id,
+                           loader.adjacency_list, loader.nodes,
+                           OptimizeFor::TIME, absolute_start_time);
+    });
 
     // BFS (Hops)
     BFSRouter bfs_router;
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = bfs_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-          OptimizeFor::PRICE, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"BFS (Hops)", "cheapest", dur.count(), res});
-    }
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = bfs_router.run(
-          active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
-          OptimizeFor::TIME, absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"BFS (Hops)", "fastest", dur.count(), res});
-    }
+    Profiler::record(researcher_benchmarks, "BFS (Hops)", "cheapest", [&] {
+      return bfs_router.run(active_source_id, active_dest_id,
+                            loader.adjacency_list, loader.nodes,
+                            OptimizeFor::PRICE, absolute_start_time);
+    });
+    Profiler::record(researcher_benchmarks, "BFS (Hops)", "fastest", [&] {
+      return bfs_router.run(active_source_id, active_dest_id,
+                            loader.adjacency_list, loader.nodes,
+                            OptimizeFor::TIME, absolute_start_time);
+    });
 
     // Two-Phase
     TwoPhaseRouter two_phase_router;
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = two_phase_router.run(
+    Profiler::record(researcher_benchmarks, "Two-Phase", "cheapest", [&] {
+      return two_phase_router.run(
           active_source_id, active_dest_id, loader.adjacency_list,
           loader.static_route_graph, loader.static_route_min_price,
           loader.static_route_min_duration, loader.nodes, OptimizeFor::PRICE,
           absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Two-Phase", "cheapest", dur.count(), res});
-    }
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = two_phase_router.run(
+    });
+    Profiler::record(researcher_benchmarks, "Two-Phase", "fastest", [&] {
+      return two_phase_router.run(
           active_source_id, active_dest_id, loader.adjacency_list,
           loader.static_route_graph, loader.static_route_min_price,
           loader.static_route_min_duration, loader.nodes, OptimizeFor::TIME,
           absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Two-Phase", "fastest", dur.count(), res});
-    }
+    });
 
     // Two-Phase Hub
     TwoPhaseHubRouter two_phase_hub_router;
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = two_phase_hub_router.run(
+    Profiler::record(researcher_benchmarks, "Two-Phase Hub", "cheapest", [&] {
+      return two_phase_hub_router.run(
           active_source_id, active_dest_id, loader.adjacency_list,
           loader.static_route_graph, loader.static_route_min_price,
           loader.static_route_min_duration, loader.nodes, OptimizeFor::PRICE,
           absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Two-Phase Hub", "cheapest", dur.count(), res});
-    }
-    {
-      auto start = std::chrono::high_resolution_clock::now();
-      RoutingResult res = two_phase_hub_router.run(
+    });
+    Profiler::record(researcher_benchmarks, "Two-Phase Hub", "fastest", [&] {
+      return two_phase_hub_router.run(
           active_source_id, active_dest_id, loader.adjacency_list,
           loader.static_route_graph, loader.static_route_min_price,
           loader.static_route_min_duration, loader.nodes, OptimizeFor::TIME,
           absolute_start_time);
-      auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::high_resolution_clock::now() - start);
-      researcher_benchmarks.push_back(
-          {"Two-Phase Hub", "fastest", dur.count(), res});
-    }
+    });
 
     // Multiple ALT (Diversified K-Best Paths)
-    {
-      auto start = std::chrono::high_resolution_clock::now();
+    Profiler::record(researcher_benchmarks, "Multiple ALT", "diverse", [&] {
       ALTRouter::DiverseKResult multi_alt_res = alt_router.run_k_diverse(
           active_source_id, active_dest_id, loader.adjacency_list, loader.nodes,
           loader.static_route_graph, loader.reverse_static_graph,
           loader.static_route_min_price, loader.static_route_min_duration,
           alt_landmark_data, absolute_start_time, 12, 5, absolute_start_time);
-      multiple_alt_compute_us =
-          std::chrono::duration_cast<std::chrono::microseconds>(
-              std::chrono::high_resolution_clock::now() - start)
-              .count();
       RoutingResult primary_multi_alt =
           multi_alt_res.best_recommendation.success
               ? multi_alt_res.best_recommendation
               : (multi_alt_res.paths.empty()
                      ? RoutingResult{false, 0, 0, {}, {}}
                      : multi_alt_res.paths[0]);
-      researcher_benchmarks.push_back(
-          {"Multiple ALT", "diverse", multiple_alt_compute_us, primary_multi_alt});
+      primary_multi_alt.metrics = multi_alt_res.total_metrics;
+      return primary_multi_alt;
+    });
+    if (!researcher_benchmarks.empty()) {
+      multiple_alt_compute_us = researcher_benchmarks.back().cpu_time_us;
     }
   }
 
@@ -2712,15 +2616,18 @@ public:
               center);
 
           std::vector<std::vector<std::string>> table_data;
-          table_data.push_back(
-              {"Algorithm", "Mode", "Time", "Nodes", "Edges", "Price", "Dur."});
+          table_data.push_back({"Algorithm", "Mode", "CPU (ms)", "Wall", "Nodes",
+                                "Edges", "Price", "Dur."});
 
           std::string last_algo = "";
-          long max_time_us = 1;
+          long max_cpu_us = 1;
 
           for (const auto &bench : researcher_benchmarks) {
-            if (bench.compute_time_us > max_time_us)
-              max_time_us = bench.compute_time_us;
+            long cpu_us = (bench.cpu_time_us > 0 || bench.wall_time_us > 0)
+                              ? bench.cpu_time_us
+                              : bench.compute_time_us;
+            if (cpu_us > max_cpu_us)
+              max_cpu_us = cpu_us;
 
             std::string display_algo = "";
             if (bench.algo_name != last_algo) {
@@ -2728,18 +2635,9 @@ public:
               last_algo = bench.algo_name;
             }
 
-            std::string time_str;
-            if (bench.compute_time_us >= 1000000) {
-              std::ostringstream oss;
-              oss << std::fixed << std::setprecision(2)
-                  << (bench.compute_time_us / 1000000.0) << " s";
-              time_str = oss.str();
-            } else {
-              std::ostringstream oss;
-              oss << std::fixed << std::setprecision(2)
-                  << (bench.compute_time_us / 1000.0) << " ms";
-              time_str = oss.str();
-            }
+            std::string cpu_str = Profiler::format_cpu_us(cpu_us);
+            std::string wall_str = Profiler::format_us_compact(
+                bench.wall_time_us > 0 ? bench.wall_time_us : cpu_us);
 
             std::string cost_str =
                 bench.result.success
@@ -2749,17 +2647,20 @@ public:
                 bench.result.success
                     ? TUIViews::format_duration(bench.result.total_time_mins)
                     : "N/A";
+            uint64_t nodes_val = (bench.nodes_expanded > 0)
+                                     ? bench.nodes_expanded
+                                     : bench.result.metrics.nodes_explored;
+            uint64_t edges_val = (bench.edges_relaxed > 0)
+                                     ? bench.edges_relaxed
+                                     : bench.result.metrics.edges_relaxed;
             std::string nodes_str =
-                bench.result.success
-                    ? std::to_string(bench.result.metrics.nodes_explored)
-                    : "N/A";
+                bench.result.success ? std::to_string(nodes_val) : "N/A";
             std::string edges_str =
-                bench.result.success
-                    ? std::to_string(bench.result.metrics.edges_relaxed)
-                    : "N/A";
+                bench.result.success ? std::to_string(edges_val) : "N/A";
 
-            table_data.push_back({display_algo, bench.mode_label, time_str,
-                                  nodes_str, edges_str, cost_str, journey_str});
+            table_data.push_back({display_algo, bench.mode_label, cpu_str,
+                                  wall_str, nodes_str, edges_str, cost_str,
+                                  journey_str});
           }
 
           auto ftx_table = Table(table_data);
@@ -2772,21 +2673,49 @@ public:
           for (size_t r = 1; r < table_data.size(); ++r) {
             ftx_table.SelectCell(0, r).Decorate(bold);
             ftx_table.SelectCell(2, r).Decorate(color(Color::GreenLight));
-            ftx_table.SelectCell(5, r).Decorate(color(Color::YellowLight));
-            ftx_table.SelectCell(6, r).Decorate(color(Color::MagentaLight));
+            ftx_table.SelectCell(3, r).Decorate(color(Color::CyanLight));
+            ftx_table.SelectCell(6, r).Decorate(color(Color::YellowLight));
+            ftx_table.SelectCell(7, r).Decorate(color(Color::MagentaLight));
           }
 
           research_elements.push_back(
-              window(text(" ALGORITHM BENCHMARK EXECUTION MATRIX ") | bold |
-                         color(Color::GreenLight),
+              window(text(" ALGORITHM BENCHMARK EXECUTION MATRIX (C++ CPU "
+                          "PROFILER) ") |
+                         bold | color(Color::GreenLight),
                      ftx_table.Render() | hcenter) |
               color(Color::GreenLight));
 
-          // Visual Speed Profiler Gauges
+          // C++ Profiler Summary & Microsecond CPU Speed Gauges
+          ProfilerSummary prof_sum =
+              Profiler::summarize(researcher_benchmarks);
+          std::ostringstream prof_oss;
+          prof_oss << " Total CPU: "
+                   << Profiler::format_cpu_us(prof_sum.total_cpu_us)
+                   << " │ Wall: "
+                   << Profiler::format_us_compact(prof_sum.total_wall_us)
+                   << " │ Nodes Expanded: " << prof_sum.total_nodes_expanded
+                   << " │ Peak RSS: " << std::fixed << std::setprecision(2)
+                   << (static_cast<double>(prof_sum.peak_rss_bytes) /
+                       (1024.0 * 1024.0 * 1024.0))
+                   << " GB";
+
           std::vector<Element> visual_gauges;
+          visual_gauges.push_back(
+              text(prof_oss.str()) | bold | color(Color::CyanLight));
+          visual_gauges.push_back(
+              text(" Fastest CPU: " + prof_sum.fastest_label + " (" +
+                   Profiler::format_cpu_us(prof_sum.fastest_cpu_us) +
+                   ") │ Fewest Nodes: " + prof_sum.fewest_nodes_label + " (" +
+                   std::to_string(prof_sum.fewest_nodes) + " nodes)") |
+              color(Color::GreenLight));
+          visual_gauges.push_back(separatorLight());
+
           for (const auto &bench : researcher_benchmarks) {
-            float ratio = (max_time_us > 0)
-                              ? float(bench.compute_time_us) / float(max_time_us)
+            long cpu_us = (bench.cpu_time_us > 0 || bench.wall_time_us > 0)
+                              ? bench.cpu_time_us
+                              : bench.compute_time_us;
+            float ratio = (max_cpu_us > 0)
+                              ? float(cpu_us) / float(max_cpu_us)
                               : 0.0f;
             ratio = std::clamp(ratio, 0.01f, 1.0f);
 
@@ -2799,18 +2728,14 @@ public:
                     color(ratio > 0.7f   ? Color::RedLight
                           : ratio > 0.3f ? Color::YellowLight
                                          : Color::GreenLight),
-                text(" " +
-                     (bench.compute_time_us < 1000
-                          ? (std::to_string(bench.compute_time_us) + " µs")
-                          : (std::to_string(bench.compute_time_us / 1000) +
-                             " ms"))) |
-                    bold | size(WIDTH, EQUAL, 10),
+                text(" " + Profiler::format_cpu_us(cpu_us)) | bold |
+                    size(WIDTH, EQUAL, 12),
             }));
           }
 
           research_elements.push_back(
-              window(text(" COMPUTATION RUNTIME SPEED PROFILER ") | bold |
-                         color(Color::YellowLight),
+              window(text(" C++ PROFILER: MICROSECOND CPU TIME & NODES EXPANDED ") |
+                         bold | color(Color::YellowLight),
                      vbox(std::move(visual_gauges))) |
               color(Color::YellowLight));
 

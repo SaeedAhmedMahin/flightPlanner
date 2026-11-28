@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/Profiler.hpp"
 #include "DataLoader.hpp"
 #include "TUI/WorldMap.hpp"
 #include <ftxui/dom/elements.hpp>
@@ -11,13 +12,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-struct AlgorithmBenchmark {
-  std::string algo_name;
-  std::string mode_label;
-  long compute_time_us;
-  RoutingResult result;
-};
 
 class TUIViews {
 public:
@@ -234,21 +228,21 @@ public:
         })) |
         color(Color::Cyan);
 
-    // 2. Algorithm Performance Table
+    // 2. Algorithm Performance Table (C++ Microsecond CPU & Node Expansion Profiler)
     std::vector<std::vector<std::string>> table_data;
-    table_data.push_back({"Algorithm", "Mode", "Compute Time",
-                          "Nodes Explored", "Edges Relaxed", "Price",
+    table_data.push_back({"Algorithm", "Mode", "CPU Time", "Wall Time",
+                          "Nodes Expanded", "Edges Relaxed", "Price",
                           "Journey Duration"});
 
     std::string last_algo = "";
-    long max_time_us = 1;
-    long max_nodes = 1;
+    long max_cpu_us = 1;
 
     for (const auto &bench : benchmarks) {
-      if (bench.compute_time_us > max_time_us)
-        max_time_us = bench.compute_time_us;
-      if (bench.result.metrics.nodes_explored > (uint64_t)max_nodes)
-        max_nodes = bench.result.metrics.nodes_explored;
+      long cpu_us = (bench.cpu_time_us > 0 || bench.wall_time_us > 0)
+                        ? bench.cpu_time_us
+                        : bench.compute_time_us;
+      if (cpu_us > max_cpu_us)
+        max_cpu_us = cpu_us;
 
       std::string display_algo = "";
       if (bench.algo_name != last_algo) {
@@ -256,18 +250,9 @@ public:
         last_algo = bench.algo_name;
       }
 
-      std::string time_str;
-      if (bench.compute_time_us >= 1000000) {
-        std::ostringstream oss;
-        oss << std::fixed << std::setprecision(2)
-            << (bench.compute_time_us / 1000000.0) << " s";
-        time_str = oss.str();
-      } else {
-        std::ostringstream oss;
-        oss << std::fixed << std::setprecision(2)
-            << (bench.compute_time_us / 1000.0) << " ms";
-        time_str = oss.str();
-      }
+      std::string cpu_str = Profiler::format_cpu_us(cpu_us);
+      std::string wall_str = Profiler::format_us_compact(
+          bench.wall_time_us > 0 ? bench.wall_time_us : cpu_us);
 
       std::string cost_str =
           bench.result.success ? ("$" + std::to_string(bench.result.total_price))
@@ -275,17 +260,19 @@ public:
       std::string journey_str =
           bench.result.success ? format_duration(bench.result.total_time_mins)
                                : "N/A";
+      uint64_t nodes_val = (bench.nodes_expanded > 0)
+                               ? bench.nodes_expanded
+                               : bench.result.metrics.nodes_explored;
+      uint64_t edges_val = (bench.edges_relaxed > 0)
+                               ? bench.edges_relaxed
+                               : bench.result.metrics.edges_relaxed;
       std::string nodes_str =
-          bench.result.success
-              ? std::to_string(bench.result.metrics.nodes_explored)
-              : "N/A";
+          bench.result.success ? std::to_string(nodes_val) : "N/A";
       std::string edges_str =
-          bench.result.success
-              ? std::to_string(bench.result.metrics.edges_relaxed)
-              : "N/A";
+          bench.result.success ? std::to_string(edges_val) : "N/A";
 
-      table_data.push_back({display_algo, bench.mode_label, time_str, nodes_str,
-                            edges_str, cost_str, journey_str});
+      table_data.push_back({display_algo, bench.mode_label, cpu_str, wall_str,
+                            nodes_str, edges_str, cost_str, journey_str});
     }
 
     auto ftx_table = Table(table_data);
@@ -298,25 +285,46 @@ public:
     for (size_t r = 1; r < table_data.size(); ++r) {
       ftx_table.SelectCell(0, r).Decorate(bold);
       ftx_table.SelectCell(2, r).Decorate(color(Color::GreenLight));
-      ftx_table.SelectCell(5, r).Decorate(color(Color::YellowLight));
-      ftx_table.SelectCell(6, r).Decorate(color(Color::MagentaLight));
+      ftx_table.SelectCell(3, r).Decorate(color(Color::CyanLight));
+      ftx_table.SelectCell(6, r).Decorate(color(Color::YellowLight));
+      ftx_table.SelectCell(7, r).Decorate(color(Color::MagentaLight));
     }
 
     auto table_box = window(
-        text(" ALGORITHM BENCHMARK EXECUTION MATRIX ") | bold | color(Color::GreenLight),
+        text(" ALGORITHM BENCHMARK EXECUTION MATRIX (C++ CPU PROFILER) ") | bold |
+            color(Color::GreenLight),
         ftx_table.Render()) |
         color(Color::GreenLight);
 
-    // 3. Performance Visual Gauges (Bar Chart of Relative Speed)
+    // 3. Performance Visual Gauges (Microsecond CPU Time & Expansion Summary)
+    ProfilerSummary prof_sum = Profiler::summarize(benchmarks);
+    std::ostringstream sum_oss;
+    sum_oss << " Total CPU: " << Profiler::format_cpu_us(prof_sum.total_cpu_us)
+            << " │ Wall: " << Profiler::format_us_compact(prof_sum.total_wall_us)
+            << " │ Nodes Expanded: " << prof_sum.total_nodes_expanded
+            << " │ Peak RSS: " << std::fixed << std::setprecision(2)
+            << (static_cast<double>(prof_sum.peak_rss_bytes) /
+                (1024.0 * 1024.0 * 1024.0))
+            << " GB";
+
     std::vector<Element> visual_gauges;
     visual_gauges.push_back(
-        text(" ALGORITHM RUNTIME PROFILE (RELATIVE SPEED) ") | bold |
-        color(Color::YellowLight));
+        text(" C++ PROFILER SUMMARY (MICROSECOND CPU TIME & NODES EXPANDED) ") |
+        bold | color(Color::YellowLight));
+    visual_gauges.push_back(text(sum_oss.str()) | color(Color::CyanLight));
+    visual_gauges.push_back(
+        text(" Fastest CPU: " + prof_sum.fastest_label + " (" +
+             Profiler::format_cpu_us(prof_sum.fastest_cpu_us) +
+             ") │ Fewest Nodes: " + prof_sum.fewest_nodes_label + " (" +
+             std::to_string(prof_sum.fewest_nodes) + " nodes)") |
+        color(Color::GreenLight));
     visual_gauges.push_back(separatorLight());
 
     for (const auto &bench : benchmarks) {
-      float ratio =
-          (max_time_us > 0) ? (float)bench.compute_time_us / (float)max_time_us : 0.0f;
+      long cpu_us = (bench.cpu_time_us > 0 || bench.wall_time_us > 0)
+                        ? bench.cpu_time_us
+                        : bench.compute_time_us;
+      float ratio = (max_cpu_us > 0) ? (float)cpu_us / (float)max_cpu_us : 0.0f;
       if (ratio < 0.02f)
         ratio = 0.02f;
 
@@ -326,24 +334,11 @@ public:
       else
         label = label.substr(0, 24);
 
-      std::string time_str;
-      if (bench.compute_time_us >= 1000000) {
-        std::ostringstream oss;
-        oss << std::fixed << std::setprecision(2)
-            << (bench.compute_time_us / 1000000.0) << " s";
-        time_str = oss.str();
-      } else {
-        std::ostringstream oss;
-        oss << std::fixed << std::setprecision(2)
-            << (bench.compute_time_us / 1000.0) << " ms";
-        time_str = oss.str();
-      }
-
       visual_gauges.push_back(hbox({
           text(label) | color(Color::GrayLight),
           gauge(ratio) | color(Color::Cyan) | flex,
-          text(" " + time_str) | bold | color(Color::GreenLight) |
-              size(WIDTH, EQUAL, 12),
+          text(" " + Profiler::format_cpu_us(cpu_us)) | bold |
+              color(Color::GreenLight) | size(WIDTH, EQUAL, 12),
       }));
     }
 

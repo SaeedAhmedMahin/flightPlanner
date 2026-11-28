@@ -8,6 +8,7 @@
 #include "Algorithms/RCAStar.hpp"
 #include "Algorithms/TwoPhaseHubRouter.hpp"
 #include "Algorithms/TwoPhaseRouter.hpp"
+#include "Core/Profiler.hpp"
 #include "DataLoader.hpp"
 #include "DataStructures/AirportSearch.hpp"
 #include "TUI/InteractiveApp.hpp"
@@ -356,247 +357,159 @@ int main(int argc, char *argv[]) {
 
   // 1. Classical Dijkstra
   Dijkstra dijkstra_router;
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = dijkstra_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::PRICE, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Dijkstra", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = dijkstra_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::TIME, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Dijkstra", "fastest", duration.count(), res});
-  }
+  Profiler::record(benchmarks, "Dijkstra", "cheapest", [&] {
+    return dijkstra_router.run(source_id, dest_id, loader.adjacency_list,
+                               loader.nodes, OptimizeFor::PRICE,
+                               absolute_start_time);
+  });
+  Profiler::record(benchmarks, "Dijkstra", "fastest", [&] {
+    return dijkstra_router.run(source_id, dest_id, loader.adjacency_list,
+                               loader.nodes, OptimizeFor::TIME,
+                               absolute_start_time);
+  });
 
   // 2. A* Search (Heuristic-Guided Pareto Search)
   AStar astar_router;
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res =
-        astar_router.run(source_id, dest_id, loader.adjacency_list,
-                         loader.nodes, OptimizeFor::PRICE, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"A*", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res =
-        astar_router.run(source_id, dest_id, loader.adjacency_list,
-                         loader.nodes, OptimizeFor::TIME, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"A*", "fastest", duration.count(), res});
-  }
+  Profiler::record(benchmarks, "A*", "cheapest", [&] {
+    return astar_router.run(source_id, dest_id, loader.adjacency_list,
+                            loader.nodes, OptimizeFor::PRICE,
+                            absolute_start_time);
+  });
+  Profiler::record(benchmarks, "A*", "fastest", [&] {
+    return astar_router.run(source_id, dest_id, loader.adjacency_list,
+                            loader.nodes, OptimizeFor::TIME,
+                            absolute_start_time);
+  });
 
   // 3. ALT Algorithm (A* with Landmarks & Triangle Inequality Lower Bounds)
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = alt_router.run(
+  Profiler::record(benchmarks, "ALT", "cheapest", [&] {
+    return alt_router.run(
         source_id, dest_id, loader.adjacency_list, loader.nodes,
         loader.static_route_graph, loader.reverse_static_graph,
         loader.static_route_min_price, loader.static_route_min_duration,
         alt_landmark_data, OptimizeFor::PRICE, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"ALT", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = alt_router.run(
+  });
+  Profiler::record(benchmarks, "ALT", "fastest", [&] {
+    return alt_router.run(
         source_id, dest_id, loader.adjacency_list, loader.nodes,
         loader.static_route_graph, loader.reverse_static_graph,
         loader.static_route_min_price, loader.static_route_min_duration,
         alt_landmark_data, OptimizeFor::TIME, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"ALT", "fastest", duration.count(), res});
-  }
+  });
 
   // 4. Resource-Constrained A* (RC-A*)
   RCAStarRouter rcastar_router;
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = rcastar_router.run(
+  Profiler::record(benchmarks, "RC-A*", "cheapest", [&] {
+    return rcastar_router.run(
         source_id, dest_id, loader.adjacency_list, loader.nodes,
         OptimizeFor::PRICE, absolute_start_time,
         RCAStarRouter::ResourceConstraints{2880, 50000, 5});
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"RC-A*", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = rcastar_router.run(
+  });
+  Profiler::record(benchmarks, "RC-A*", "fastest", [&] {
+    return rcastar_router.run(
         source_id, dest_id, loader.adjacency_list, loader.nodes,
         OptimizeFor::TIME, absolute_start_time,
         RCAStarRouter::ResourceConstraints{2880, 50000, 5});
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"RC-A*", "fastest", duration.count(), res});
-  }
+  });
 
   // 5. Contraction Hierarchies (Hierarchical Node Contraction)
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = ch_router.run(
+  Profiler::record(benchmarks, "Contraction H.", "cheapest", [&] {
+    return ch_router.run(
         source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
         loader.static_route_min_price, loader.static_route_min_duration,
         loader.nodes, OptimizeFor::PRICE, absolute_start_time, ch_graph_price);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back(
-        {"Contraction H.", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = ch_router.run(
+  });
+  Profiler::record(benchmarks, "Contraction H.", "fastest", [&] {
+    return ch_router.run(
         source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
         loader.static_route_min_price, loader.static_route_min_duration,
         loader.nodes, OptimizeFor::TIME, absolute_start_time, ch_graph_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Contraction H.", "fastest", duration.count(), res});
-  }
+  });
 
   // 6. Lagrangian Relaxation Router
   LagrangianRelaxationRouter lr_router;
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = lr_router.run(
+  Profiler::record(benchmarks, "Lagrangian", "cheapest", [&] {
+    return lr_router.run(
         source_id, dest_id, loader.adjacency_list, loader.nodes,
         OptimizeFor::PRICE, absolute_start_time,
         LagrangianRelaxationRouter::ResourceConstraints{2880, 50000, 5});
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Lagrangian", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = lr_router.run(
+  });
+  Profiler::record(benchmarks, "Lagrangian", "fastest", [&] {
+    return lr_router.run(
         source_id, dest_id, loader.adjacency_list, loader.nodes,
         OptimizeFor::TIME, absolute_start_time,
         LagrangianRelaxationRouter::ResourceConstraints{2880, 50000, 5});
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Lagrangian", "fastest", duration.count(), res});
-  }
+  });
 
   // 7. Column Generation Router (Master RMP & Subproblem)
   ColumnGenerationRouter cg_router;
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = cg_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::PRICE, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Column-Gen", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = cg_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::TIME, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Column-Gen", "fastest", duration.count(), res});
-  }
+  Profiler::record(benchmarks, "Column-Gen", "cheapest", [&] {
+    return cg_router.run(source_id, dest_id, loader.adjacency_list,
+                         loader.nodes, OptimizeFor::PRICE, absolute_start_time);
+  });
+  Profiler::record(benchmarks, "Column-Gen", "fastest", [&] {
+    return cg_router.run(source_id, dest_id, loader.adjacency_list,
+                         loader.nodes, OptimizeFor::TIME, absolute_start_time);
+  });
 
   // 8. BFS Router (Minimum Transfers)
   BFSRouter bfs_router;
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = bfs_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::PRICE, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"BFS (Hops)", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = bfs_router.run(
-        source_id, dest_id, loader.adjacency_list, loader.nodes,
-        OptimizeFor::TIME, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"BFS (Hops)", "fastest", duration.count(), res});
-  }
+  Profiler::record(benchmarks, "BFS (Hops)", "cheapest", [&] {
+    return bfs_router.run(source_id, dest_id, loader.adjacency_list,
+                          loader.nodes, OptimizeFor::PRICE, absolute_start_time);
+  });
+  Profiler::record(benchmarks, "BFS (Hops)", "fastest", [&] {
+    return bfs_router.run(source_id, dest_id, loader.adjacency_list,
+                          loader.nodes, OptimizeFor::TIME, absolute_start_time);
+  });
 
-  // 12. Two-Phase Router (Topology Corridor + Schedule Sweep)
+  // 9. Two-Phase Router (Topology Corridor + Schedule Sweep)
   TwoPhaseRouter two_phase_router;
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = two_phase_router.run(
+  Profiler::record(benchmarks, "Two-Phase", "cheapest", [&] {
+    return two_phase_router.run(
         source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
         loader.static_route_min_price, loader.static_route_min_duration,
         loader.nodes, OptimizeFor::PRICE, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Two-Phase", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = two_phase_router.run(
+  });
+  Profiler::record(benchmarks, "Two-Phase", "fastest", [&] {
+    return two_phase_router.run(
         source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
         loader.static_route_min_price, loader.static_route_min_duration,
         loader.nodes, OptimizeFor::TIME, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Two-Phase", "fastest", duration.count(), res});
-  }
+  });
 
-  // 13. Two-Phase Hub Router (Hierarchical Aviation Hub Corridors)
+  // 10. Two-Phase Hub Router (Hierarchical Aviation Hub Corridors)
   TwoPhaseHubRouter two_phase_hub_router;
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = two_phase_hub_router.run(
+  Profiler::record(benchmarks, "Two-Phase Hub", "cheapest", [&] {
+    return two_phase_hub_router.run(
         source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
         loader.static_route_min_price, loader.static_route_min_duration,
         loader.nodes, OptimizeFor::PRICE, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Two-Phase Hub", "cheapest", duration.count(), res});
-  }
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    RoutingResult res = two_phase_hub_router.run(
+  });
+  Profiler::record(benchmarks, "Two-Phase Hub", "fastest", [&] {
+    return two_phase_hub_router.run(
         source_id, dest_id, loader.adjacency_list, loader.static_route_graph,
         loader.static_route_min_price, loader.static_route_min_duration,
         loader.nodes, OptimizeFor::TIME, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    benchmarks.push_back({"Two-Phase Hub", "fastest", duration.count(), res});
-  }
+  });
 
   // 11. Multiple ALT (Diversified K-Best Paths & Best Path Recommendation)
   ALTRouter::DiverseKResult multi_alt_res;
-  {
-    auto start = std::chrono::high_resolution_clock::now();
+  Profiler::record(benchmarks, "Multiple ALT", "diverse", [&] {
     multi_alt_res = alt_router.run_k_diverse(
         source_id, dest_id, loader.adjacency_list, loader.nodes,
         loader.static_route_graph, loader.reverse_static_graph,
         loader.static_route_min_price, loader.static_route_min_duration,
         alt_landmark_data, absolute_start_time, 10, 5, absolute_start_time);
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
     RoutingResult primary_alt =
         multi_alt_res.best_recommendation.success
             ? multi_alt_res.best_recommendation
             : (multi_alt_res.paths.empty()
                    ? RoutingResult{false, 0, 0, {}, {}}
                    : multi_alt_res.paths[0]);
-    benchmarks.push_back(
-        {"Multiple ALT", "diverse", duration.count(), primary_alt});
-  }
+    primary_alt.metrics = multi_alt_res.total_metrics;
+    return primary_alt;
+  });
 
   // Render Researcher TUI with FTXUI (Benchmark table, visual profiler, Multiple ALT analysis)
   TUIViews::render_researcher_mode(

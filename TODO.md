@@ -56,7 +56,7 @@
          - [x] Great Circle World Map trajectory integration across all itineraries
 
 ## 5. Research & Benchmarking
-- [ ] C++ Profiler (Track microsecond CPU time & nodes expanded)
+- [x] C++ Profiler (Track microsecond CPU time & nodes expanded)
 - [ ] Headless Benchmark Mode (Run 10,000 random query pairs)
 - [ ] Compare accuracy of algorithms:
     - [ ] heuristic accuracy
