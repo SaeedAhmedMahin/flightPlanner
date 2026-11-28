@@ -57,7 +57,7 @@
 
 ## 5. Research & Benchmarking
 - [x] C++ Profiler (Track microsecond CPU time & nodes expanded)
-- [ ] Headless Benchmark Mode (Run 10,000 random query pairs)
+- [x] Headless Benchmark Mode (Run 10,000 random query pairs)
 - [ ] Compare accuracy of algorithms:
     - [ ] heuristic accuracy
     - [ ] optimality gaps

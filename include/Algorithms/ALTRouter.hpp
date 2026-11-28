@@ -451,8 +451,19 @@ public:
                                   &hub_penalties, &airline_penalties, 450};
 
     // Phase 1: Pure optimal baselines (Cheapest, Fastest, Balanced Best-Value)
-    for (ObjectiveMode obj :
-         {ObjectiveMode::PRICE, ObjectiveMode::TIME, ObjectiveMode::BALANCED}) {
+    RoutingResult r_price = run_with_config(
+        source_id, dest_id, adjacency_list, nodes, landmark_data,
+        ObjectiveMode::PRICE, start_time, max_hops, no_penalties, ws, true,
+        true);
+    if (!r_price.success) {
+      out.total_metrics = r_price.metrics;
+      out.best_recommendation = {false, 0, 0, {}, out.total_metrics};
+      out.recommendation_reason = "No route found";
+      return out;
+    }
+    record_result(r_price);
+
+    for (ObjectiveMode obj : {ObjectiveMode::TIME, ObjectiveMode::BALANCED}) {
       RoutingResult r = run_with_config(
           source_id, dest_id, adjacency_list, nodes, landmark_data, obj,
           start_time, max_hops, no_penalties, ws, true, true);
@@ -469,10 +480,10 @@ public:
     }
 
     // Phase 3: Iterative penalized ALT across objectives & windows until K paths
-    const uint32_t max_extra_passes = std::max<uint32_t>(K + 6, 16);
+    const uint32_t max_extra_passes = std::max<uint32_t>(K + 4, 14);
     uint32_t consecutive_misses = 0;
     for (uint32_t p = 0;
-         p < max_extra_passes && out.paths.size() < K && consecutive_misses < 5;
+         p < max_extra_passes && out.paths.size() < K && consecutive_misses < 3;
          ++p) {
       ObjectiveMode obj = (p % 3 == 0)
                               ? ObjectiveMode::PRICE

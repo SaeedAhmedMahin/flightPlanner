@@ -8,6 +8,7 @@
 #include "Algorithms/RCAStar.hpp"
 #include "Algorithms/TwoPhaseHubRouter.hpp"
 #include "Algorithms/TwoPhaseRouter.hpp"
+#include "Core/HeadlessBenchmark.hpp"
 #include "Core/Profiler.hpp"
 #include "DataLoader.hpp"
 #include "DataStructures/AirportSearch.hpp"
@@ -176,6 +177,8 @@ int main(int argc, char *argv[]) {
   // Mode selection defaults to CUSTOMER mode
   TUIViews::UIMode ui_mode = TUIViews::UIMode::CUSTOMER;
   bool mode_specified_cli = false;
+  bool headless_benchmark = false;
+  HeadlessBenchmark::Config bench_cfg;
 
   std::string source_iata = "";
   std::string dest_iata = "";
@@ -185,7 +188,21 @@ int main(int argc, char *argv[]) {
   std::vector<std::string> positional_args;
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
-    if (arg == "--researcher" || arg == "-r" || arg == "researcher") {
+    if (arg == "--benchmark" || arg == "-b" || arg == "--headless" ||
+        arg == "benchmark") {
+      headless_benchmark = true;
+      mode_specified_cli = true;
+    } else if (arg.rfind("--queries=", 0) == 0) {
+      bench_cfg.num_queries =
+          static_cast<uint32_t>(std::max(1, std::stoi(arg.substr(10))));
+    } else if (arg.rfind("--seed=", 0) == 0) {
+      bench_cfg.seed = static_cast<uint32_t>(std::stoul(arg.substr(7)));
+    } else if (arg.rfind("--threads=", 0) == 0) {
+      bench_cfg.num_threads =
+          static_cast<uint32_t>(std::max(1, std::stoi(arg.substr(10))));
+    } else if (arg.rfind("--output=", 0) == 0) {
+      bench_cfg.output_csv = arg.substr(9);
+    } else if (arg == "--researcher" || arg == "-r" || arg == "researcher") {
       ui_mode = TUIViews::UIMode::RESEARCHER;
       mode_specified_cli = true;
     } else if (arg == "--customer" || arg == "-c" || arg == "customer") {
@@ -193,7 +210,9 @@ int main(int argc, char *argv[]) {
       mode_specified_cli = true;
     } else if (arg.rfind("--mode=", 0) == 0) {
       std::string mode_val = arg.substr(7);
-      if (mode_val == "researcher" || mode_val == "r") {
+      if (mode_val == "benchmark" || mode_val == "headless") {
+        headless_benchmark = true;
+      } else if (mode_val == "researcher" || mode_val == "r") {
         ui_mode = TUIViews::UIMode::RESEARCHER;
       } else {
         ui_mode = TUIViews::UIMode::CUSTOMER;
@@ -215,6 +234,10 @@ int main(int argc, char *argv[]) {
   std::cout << "Loading Data...\n";
   loader.load_data("data/processed/airports_clean.csv",
                    "data/processed/routes_clean.csv");
+
+  if (headless_benchmark) {
+    return HeadlessBenchmark::execute(loader, bench_cfg);
+  }
 
   // If running in interactive terminal: launch full mouse-driven interactive UI!
   if (isatty(STDIN_FILENO)) {

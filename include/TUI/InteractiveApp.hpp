@@ -10,6 +10,7 @@
 #include "Algorithms/RCAStar.hpp"
 #include "Algorithms/TwoPhaseHubRouter.hpp"
 #include "Algorithms/TwoPhaseRouter.hpp"
+#include "Core/HeadlessBenchmark.hpp"
 #include "DataLoader.hpp"
 #include "DataStructures/AirportSearch.hpp"
 #include "DataStructures/FilterParser.hpp"
@@ -18,6 +19,7 @@
 #include "TUI/WorldMap.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <ftxui/component/component.hpp>
@@ -29,9 +31,11 @@
 #include <ftxui/screen/box.hpp>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -658,6 +662,19 @@ public:
   std::string research_btn_label = " 🔬 Research Mode: OFF ";
   std::string status_message = "Ready. Click SEARCH FLIGHTS to query.";
 
+  // Saved Headless Benchmark View State (loaded from file, never auto-runs)
+  bool show_benchmark_view = false;
+  std::string benchmark_btn_label = " 📊 Show Benchmark ";
+  std::string rerun_bench_btn_label = " 🔄 Rerun Benchmark ";
+  HeadlessBenchmark::SavedBenchmarkSummary saved_bench_summary;
+  ftxui::Box benchmark_toggle_box;
+  ftxui::Box rerun_benchmark_box;
+  std::atomic<bool> bench_running{false};
+  std::atomic<bool> bench_cancel{false};
+  std::thread bench_thread;
+  std::mutex bench_ui_mutex;
+  std::string bench_progress_text;
+
   // Scroll state for the independent results viewport
   int scroll_line = 0;
   int content_height_ = 0;
@@ -709,6 +726,13 @@ public:
     update_date_btn_labels();
     update_research_btn_label();
     update_suggestions();
+  }
+
+  ~InteractiveApp() {
+    bench_cancel.store(true);
+    if (bench_thread.joinable()) {
+      bench_thread.join();
+    }
   }
 
   void update_research_btn_label() {
@@ -1475,6 +1499,85 @@ public:
     auto dst_sugg_container = Container::Horizontal(dst_buttons);
 
     // 7. Action / Header Buttons
+    Component benchmark_toggle_btn = Button(
+        &benchmark_btn_label,
+        [&] {
+          show_benchmark_view = !show_benchmark_view;
+          benchmark_btn_label = show_benchmark_view ? " 📊 Hide Benchmark "
+                                                    : " 📊 Show Benchmark ";
+          if (show_benchmark_view) {
+            if (!saved_bench_summary.loaded) {
+              saved_bench_summary = HeadlessBenchmark::load_or_build_summary();
+            }
+            scroll_line = customer_height_;
+          } else {
+            scroll_line = 0;
+          }
+        },
+        ButtonOption::Border());
+
+    auto start_rerun_benchmark = [&] {
+      if (bench_running.load())
+        return;
+      if (bench_thread.joinable())
+        bench_thread.join();
+      bench_cancel.store(false);
+      bench_running.store(true);
+      {
+        std::lock_guard<std::mutex> lock(bench_ui_mutex);
+        rerun_bench_btn_label = " ⏳ Running 10k... ";
+        bench_progress_text =
+            "Running 10,000 random query pairs across worker threads...";
+      }
+      bench_thread = std::thread([&]() {
+        HeadlessBenchmark::Config cfg;
+        cfg.num_queries = 10000;
+        cfg.seed = 42;
+        cfg.output_csv = "benchmarks/headless_benchmarks.csv";
+        cfg.summary_csv = "benchmarks/headless_summary.csv";
+        cfg.quiet = true;
+
+        int rc = HeadlessBenchmark::execute(
+            loader, cfg, &bench_cancel,
+            [&](uint32_t done, uint32_t total, double elapsed_s, double qps,
+                double eta_s) {
+              std::ostringstream oss;
+              oss << std::fixed << std::setprecision(1) << "Progress: [" << done
+                  << "/" << total << "] " << (100.0 * done / total) << "%  │  "
+                  << elapsed_s << "s elapsed  │  " << qps << " q/s  │  ETA "
+                  << eta_s << "s";
+              {
+                std::lock_guard<std::mutex> lock(bench_ui_mutex);
+                bench_progress_text = oss.str();
+              }
+              screen.PostEvent(Event::Custom);
+            });
+
+        if (rc == 0 && !bench_cancel.load()) {
+          auto reloaded = HeadlessBenchmark::load_or_build_summary(
+              cfg.summary_csv, cfg.output_csv);
+          {
+            std::lock_guard<std::mutex> lock(bench_ui_mutex);
+            saved_bench_summary = std::move(reloaded);
+            bench_progress_text =
+                "✅ Completed 10,000 queries & saved to " + cfg.summary_csv;
+            status_message = "✅ Benchmark saved: " + cfg.summary_csv;
+            rerun_bench_btn_label = " 🔄 Rerun Benchmark ";
+          }
+        } else {
+          std::lock_guard<std::mutex> lock(bench_ui_mutex);
+          bench_progress_text = "Benchmark stopped.";
+          rerun_bench_btn_label = " 🔄 Rerun Benchmark ";
+        }
+        bench_running.store(false);
+        screen.PostEvent(Event::Custom);
+      });
+    };
+
+    Component rerun_benchmark_btn = Button(
+        &rerun_bench_btn_label, [&] { start_rerun_benchmark(); },
+        ButtonOption::Border());
+
     Component research_toggle_btn = Button(
         &research_btn_label,
         [&] {
@@ -1614,6 +1717,7 @@ public:
     // Assemble interactive component hierarchy
     auto top_header_buttons = Container::Horizontal({
         map_toggle_btn,
+        benchmark_toggle_btn,
         research_toggle_btn,
         exit_btn,
     });
@@ -1652,6 +1756,7 @@ public:
               [&] { return selected_trip_type == 0; }),
         filters_container,
         opt_buttons_container,
+        Maybe(rerun_benchmark_btn, [&] { return show_benchmark_view; }),
     });
 
     auto footer_controls = Container::Horizontal({
@@ -1838,6 +1943,11 @@ public:
                   (show_world_map ? color(Color::CyanLight)
                                   : color(Color::GrayLight)) |
                   reflect(map_toggle_box),
+              text(" "),
+              benchmark_toggle_btn->Render() |
+                  (show_benchmark_view ? color(Color::GreenLight)
+                                       : color(Color::CyanLight)) |
+                  reflect(benchmark_toggle_box),
               text(" "),
               research_toggle_btn->Render() |
                   (show_research_mode ? color(Color::GreenLight)
@@ -2768,6 +2878,109 @@ public:
 
       std::vector<Element> scroll_body;
       scroll_body.push_back(customer_block);
+
+      // =====================================================================
+      // SAVED 10,000-QUERY BENCHMARK REPORT (Loaded from file; optional Rerun)
+      // =====================================================================
+      if (show_benchmark_view) {
+        HeadlessBenchmark::SavedBenchmarkSummary bench_snap;
+        std::string progress_snap;
+        bool is_running = bench_running.load();
+        {
+          std::lock_guard<std::mutex> lock(bench_ui_mutex);
+          bench_snap = saved_bench_summary;
+          progress_snap = bench_progress_text;
+        }
+
+        std::vector<Element> bench_rows;
+        std::ostringstream hdr_oss;
+        if (bench_snap.loaded) {
+          hdr_oss << " Saved Queries: " << bench_snap.num_queries
+                  << "  │  Source: " << bench_snap.source_file;
+          if (bench_snap.total_wall_s > 0.0) {
+            hdr_oss << std::fixed << std::setprecision(2) << "  │  Wall: "
+                    << bench_snap.total_wall_s << "s";
+          }
+          if (bench_snap.peak_rss_gb > 0.0) {
+            hdr_oss << std::fixed << std::setprecision(2) << "  │  Peak RSS: "
+                    << bench_snap.peak_rss_gb << " GB";
+          }
+        } else {
+          hdr_oss << " No saved benchmark summary found yet ("
+                  << "benchmarks/headless_benchmarks.csv). Click Rerun Benchmark "
+                     "to generate.";
+        }
+
+        bench_rows.push_back(hbox({
+            text(hdr_oss.str()) | bold | color(Color::CyanLight) | vcenter,
+            filler(),
+            rerun_benchmark_btn->Render() | bold |
+                (is_running ? color(Color::YellowLight)
+                            : color(Color::GreenLight)) |
+                reflect(rerun_benchmark_box),
+        }));
+
+        if (!progress_snap.empty()) {
+          bench_rows.push_back(
+              text(" " + progress_snap) |
+              (is_running ? color(Color::YellowLight) : color(Color::GreenLight)));
+        }
+
+        if (bench_snap.loaded && !bench_snap.rows.empty()) {
+          bench_rows.push_back(separatorLight());
+          std::vector<std::vector<std::string>> btable;
+          btable.push_back({"Algorithm", "Mode", "Succ%", "Mean CPU", "P95 CPU",
+                            "Max CPU", "Mean Nodes", "Avg$", "AvgDur"});
+
+          std::string prev_algo;
+          for (const auto &r : bench_snap.rows) {
+            std::string algo_col = (r.algo != prev_algo) ? r.algo : "";
+            prev_algo = r.algo;
+
+            std::ostringstream succ_s, mean_s, p95_s, max_s, nodes_s, price_s,
+                dur_s;
+            succ_s << std::fixed << std::setprecision(1) << r.succ_pct << "%";
+            mean_s << std::fixed << std::setprecision(3) << r.mean_cpu_ms
+                   << " ms";
+            p95_s << std::fixed << std::setprecision(3) << r.p95_cpu_ms
+                  << " ms";
+            max_s << std::fixed << std::setprecision(3) << r.max_cpu_ms
+                  << " ms";
+            nodes_s << std::fixed << std::setprecision(1) << r.mean_nodes;
+            price_s << "$" << std::fixed << std::setprecision(0) << r.avg_price;
+            dur_s << std::fixed << std::setprecision(0) << r.avg_dur_mins
+                  << "m";
+
+            btable.push_back({algo_col, r.mode, succ_s.str(), mean_s.str(),
+                              p95_s.str(), max_s.str(), nodes_s.str(),
+                              price_s.str(), dur_s.str()});
+          }
+
+          auto ftx_btable = Table(btable);
+          ftx_btable.SelectAll().Border(LIGHT);
+          ftx_btable.SelectAll().SeparatorVertical(LIGHT);
+          ftx_btable.SelectRow(0).Decorate(bold);
+          ftx_btable.SelectRow(0).Border(DOUBLE);
+          ftx_btable.SelectRow(0).DecorateCells(color(Color::CyanLight));
+          for (size_t row_i = 1; row_i < btable.size(); ++row_i) {
+            ftx_btable.SelectCell(0, row_i).Decorate(bold);
+            ftx_btable.SelectCell(3, row_i).Decorate(color(Color::GreenLight));
+            ftx_btable.SelectCell(4, row_i).Decorate(color(Color::CyanLight));
+            ftx_btable.SelectCell(7, row_i).Decorate(color(Color::YellowLight));
+            ftx_btable.SelectCell(8, row_i).Decorate(color(Color::MagentaLight));
+          }
+          bench_rows.push_back(ftx_btable.Render() | hcenter);
+        }
+
+        scroll_body.push_back(text(" "));
+        scroll_body.push_back(
+            window(text(" 📊 SAVED 10,000-QUERY BENCHMARK REPORT (CACHED FROM "
+                        "FILE) ") |
+                       bold | color(Color::GreenLight),
+                   vbox(std::move(bench_rows))) |
+            color(Color::GreenLight));
+      }
+
       for (auto &el : research_elements) {
         scroll_body.push_back(std::move(el));
       }
@@ -2860,6 +3073,7 @@ public:
 
       // Clickable buttons, tabs, chips, cards -> Hand ("pointer")
       if (map_toggle_box.Contain(mx, my) ||
+          benchmark_toggle_box.Contain(mx, my) ||
           research_toggle_box.Contain(mx, my) || exit_box.Contain(mx, my) ||
           trip_type_box.Contain(mx, my) || preference_box.Contain(mx, my) ||
           search_box.Contain(mx, my) || clear_filter_box.Contain(mx, my) ||
@@ -2913,6 +3127,10 @@ public:
       }
       if (viewport_box.Contain(mx, my)) {
         if (mx >= viewport_box.x_max - 1) {
+          set_mouse_cursor("pointer");
+          return;
+        }
+        if (show_benchmark_view && rerun_benchmark_box.Contain(mx, my)) {
           set_mouse_cursor("pointer");
           return;
         }
@@ -3080,6 +3298,12 @@ public:
             selected_preference = 2;
             last_preference = 2;
             sync_selected_flight_from_preference();
+            return true;
+          }
+          if (show_benchmark_view && viewport_box.Contain(m.x, m.y) &&
+              rerun_benchmark_box.Contain(m.x, m.y)) {
+            rerun_benchmark_btn->TakeFocus();
+            start_rerun_benchmark();
             return true;
           }
           for (size_t i = 0;

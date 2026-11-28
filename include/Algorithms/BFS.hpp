@@ -78,7 +78,7 @@ public:
         continue;
       }
 
-      if (current.hops >= max_hops) {
+      if (current.hops >= max_hops || current.hops >= min_dest_hops) {
         continue;
       }
 
@@ -125,6 +125,12 @@ public:
         }
 
         uint8_t next_hops = current.hops + 1;
+        if (next_hops >= min_dest_hops && next_node != dest_id) {
+          continue;
+        }
+        if (next_hops == max_hops && next_node != dest_id) {
+          continue;
+        }
 
         // Pareto dominance check at next_node
         if (is_dominated(next_node, dest_id, pareto_labels[next_node], new_cost,
